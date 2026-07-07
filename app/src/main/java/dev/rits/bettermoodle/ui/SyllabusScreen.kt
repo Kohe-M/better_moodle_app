@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.SyllabusRecord
 import dev.rits.bettermoodle.data.SyllabusRepository
+import dev.rits.bettermoodle.data.SyllabusSearchResult
 import kotlinx.coroutines.launch
 
 /**
@@ -78,9 +79,18 @@ fun SyllabusScreen(container: AppContainer) {
         scope.launch {
             searching = true
             errorMessage = null
-            results = runCatching { container.syllabusRepository.search(q) }
-                .onFailure { errorMessage = "検索に失敗しました: ${it.message}" }
-                .getOrDefault(emptyList())
+            when (val result = container.syllabusRepository.searchResult(q)) {
+                is SyllabusSearchResult.Success -> results = result.records
+                is SyllabusSearchResult.NoResults -> results = emptyList()
+                is SyllabusSearchResult.NetworkError -> {
+                    results = null
+                    errorMessage = "シラバス検索の通信に失敗しました"
+                }
+                is SyllabusSearchResult.InvalidResponse -> {
+                    results = null
+                    errorMessage = "シラバス検索の応答形式が変わった可能性があります"
+                }
+            }
             searching = false
         }
     }

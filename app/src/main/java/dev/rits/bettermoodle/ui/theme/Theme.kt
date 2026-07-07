@@ -10,53 +10,65 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-// 立命館のえんじ色をベースにしたブランドテーマ
-private val RitsRed = Color(0xFF8E2340)
-private val RitsRedDark = Color(0xFF6E1730)
-private val Accent = Color(0xFFF0B429)
+private val Blue = Color(0xFF0B5CAD)
+private val BlueDark = Color(0xFF78B7FF)
+private val Teal = Color(0xFF006B62)
+private val Amber = Color(0xFF8A5A00)
 
 private val LightColors = lightColorScheme(
-    primary = RitsRed,
+    primary = Blue,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFD9DF),
-    onPrimaryContainer = Color(0xFF3E0016),
-    secondary = Color(0xFF775058),
-    secondaryContainer = Color(0xFFFFD9DF),
-    onSecondaryContainer = Color(0xFF2C1217),
-    tertiary = Color(0xFF7A5900),
-    tertiaryContainer = Color(0xFFFFE08B),
-    onTertiaryContainer = Color(0xFF261A00),
-    background = Color(0xFFFDF8F8),
-    surface = Color(0xFFFDF8F8),
-    surfaceVariant = Color(0xFFF3DDE0),
-    onSurfaceVariant = Color(0xFF524345),
-    outlineVariant = Color(0xFFD6C2C5),
+    primaryContainer = Color(0xFFD7E9FF),
+    onPrimaryContainer = Color(0xFF001C37),
+    secondary = Teal,
+    secondaryContainer = Color(0xFFCFEDEA),
+    onSecondaryContainer = Color(0xFF00201D),
+    tertiary = Amber,
+    tertiaryContainer = Color(0xFFFFE2A8),
+    onTertiaryContainer = Color(0xFF2B1B00),
+    background = Color(0xFFF7FAFE),
+    onBackground = Color(0xFF101418),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF101418),
+    surfaceVariant = Color(0xFFE5EBF2),
+    onSurfaceVariant = Color(0xFF303A45),
+    error = Color(0xFFB3261E),
+    errorContainer = Color(0xFFFFDAD6),
+    onErrorContainer = Color(0xFF410002),
+    outline = Color(0xFF65717E),
+    outlineVariant = Color(0xFFC5CED8),
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFFFFB1C0),
-    onPrimary = Color(0xFF5A0022),
-    primaryContainer = Color(0xFF5C2334),
-    onPrimaryContainer = Color(0xFFFFD9DF),
-    secondary = Color(0xFFE6BDC4),
-    secondaryContainer = Color(0xFF4A2932),
-    onSecondaryContainer = Color(0xFFFFD9DF),
-    tertiary = Color(0xFFF3C04B),
-    tertiaryContainer = Color(0xFF5B4300),
-    onTertiaryContainer = Color(0xFFFFE08B),
-    background = Color(0xFF161213),
-    surface = Color(0xFF161213),
-    surfaceVariant = Color(0xFF2A2226),
-    onSurfaceVariant = Color(0xFFD6C2C5),
-    outlineVariant = Color(0xFF3E3438),
+    primary = BlueDark,
+    onPrimary = Color(0xFF002F5D),
+    primaryContainer = Color(0xFF004881),
+    onPrimaryContainer = Color(0xFFD7E9FF),
+    secondary = Color(0xFF80D5CE),
+    secondaryContainer = Color(0xFF00504A),
+    onSecondaryContainer = Color(0xFFCFEDEA),
+    tertiary = Color(0xFFFFC857),
+    tertiaryContainer = Color(0xFF664200),
+    onTertiaryContainer = Color(0xFFFFE2A8),
+    background = Color(0xFF101418),
+    onBackground = Color(0xFFE2E8F0),
+    surface = Color(0xFF141A20),
+    onSurface = Color(0xFFE2E8F0),
+    surfaceVariant = Color(0xFF2B333D),
+    onSurfaceVariant = Color(0xFFC5CED8),
+    error = Color(0xFFFFB4AB),
+    errorContainer = Color(0xFF93000A),
+    onErrorContainer = Color(0xFFFFDAD6),
+    outline = Color(0xFF8F9BA8),
+    outlineVariant = Color(0xFF3F4A55),
 )
 
 private val AppShapes = Shapes(
     extraSmall = RoundedCornerShape(6.dp),
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(14.dp),
-    large = RoundedCornerShape(20.dp),
-    extraLarge = RoundedCornerShape(28.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(8.dp),
+    large = RoundedCornerShape(12.dp),
+    extraLarge = RoundedCornerShape(16.dp),
 )
 
 @Composable

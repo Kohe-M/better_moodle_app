@@ -68,8 +68,8 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 - **認証まわりの実測 (2026-07)**: Cookieを持たないクライアントなら `aura.token="null"`・fwuid任意で成功。
   Cookieありのブラウザセッションではセッション紐付きCSRFトークンが必要 (`invalid_csrf`)。
   そのためアプリのHTTPクライアントは意図的にCookieを保持しない。
-  fwuidの検証が将来入った場合はトップページの `/sfsites/auraFW/javascript/{fwuid}/aura_prod.js` から動的取得する
-- 解決不能時のフォールバックとして Moodle-Schedule-Extension 作者のCloudflare Worker (`授業コード → URL`) も残している。結果はローカルにキャッシュ
+  fwuidの検証が将来入った場合はトップページの `/sfsites/auraFW/javascript/{fwuid}/aura_prod.js` から動的取得する。
+  解決不能時も外部resolverへ授業コードを送信せず、直接APIの失敗状態として扱う。
 
 ### スチューデントポータル
 
@@ -81,10 +81,10 @@ API化する場合はWebViewのセッションCookie (`sid`) を使って `sfsit
 ## 既知の制約・次のステップ
 
 - [ ] `rutime_table` ブロックの実際のHTMLでの時間割解析検証 (実アカウントでの動作確認が必要。取得できない場合はエラー表示にフォールバック)
-- [x] シラバスresolverの自前化 (Aura API直接呼び出し。Workerはフォールバックに降格)
+- [x] シラバスresolverの自前化 (Aura API直接呼び出しのみ。外部Worker fallbackなし)
 - [ ] ポータルのネイティブ化 (休講情報などの抽出)
 - [ ] 通知の既読同期 (`core_message_mark_notification_read`)
-- [ ] トークンの暗号化保存 (EncryptedSharedPreferences)
+- [x] Moodle Web Service token のAndroid Keystore暗号化保存
 - [ ] Google Play 配信するなら大学への確認を推奨 (非公式ツールのため)
 
 ## 免責

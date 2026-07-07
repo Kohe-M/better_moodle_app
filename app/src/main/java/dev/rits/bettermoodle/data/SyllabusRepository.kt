@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -19,7 +20,6 @@ import okhttp3.Request
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 
-/** シラバス検索結果 (Salesforce R_Syllabus__c) */
 @Serializable
 data class SyllabusRecord(
     @SerialName("Id") val id: String = "",
@@ -32,23 +32,19 @@ data class SyllabusRecord(
     @SerialName("R_SlCourseOpenPeriodName__c") val term: String? = null,
     @SerialName("R_SlDepartmentId__c") val departments: String? = null,
 ) {
-    /** コース名先頭の5桁授業コード */
     val courseCode: String?
         get() = Regex("^(\\d{5})[:：]").find(courseName)?.groupValues?.get(1)
 }
 
-/**
- * 立命館シラバス (syllabus.ritsumei.ac.jp, Salesforce Experience Cloud/Aura) の直接API。
- *
- * ゲスト (Cookieなし) であれば aura.token="null"・任意のfwuidで
- * POST /syllabus/s/sfsites/aura の ApexActionController 経由で
- * R_SyllabusPublicPageController.getSyllabusRecords を呼び出せることを確認済み。
- * (Cookieを持つブラウザセッションではCSRFトークンが要求されるため、
- *  このクライアントは意図的にCookieを保持しない)
- */
+sealed interface SyllabusSearchResult {
+    data class Success(val records: List<SyllabusRecord>) : SyllabusSearchResult
+    data object NoResults : SyllabusSearchResult
+    data class NetworkError(val statusCode: Int? = null) : SyllabusSearchResult
+    data object InvalidResponse : SyllabusSearchResult
+}
+
 class SyllabusRepository(
     private val store: SessionStore,
-    private val fallbackResolverUrl: String = FALLBACK_RESOLVER,
 ) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -57,16 +53,23 @@ class SyllabusRepository(
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
-    /**
-     * キーワード検索 (科目名・授業コード等)。
-     * 年度は4月始まりの学年暦で解釈する。
-     */
     suspend fun search(
         keyword: String,
         year: Int = academicYear(),
         limits: Int = 50,
         lang: String = "ja",
-    ): List<SyllabusRecord> = withContext(Dispatchers.IO) {
+    ): List<SyllabusRecord> =
+        when (val result = searchResult(keyword, year, limits, lang)) {
+            is SyllabusSearchResult.Success -> result.records
+            else -> emptyList()
+        }
+
+    suspend fun searchResult(
+        keyword: String,
+        year: Int = academicYear(),
+        limits: Int = 50,
+        lang: String = "ja",
+    ): SyllabusSearchResult = withContext(Dispatchers.IO) {
         val action = buildJsonObject {
             put("lang", lang)
             put("keyword", keyword)
@@ -116,46 +119,29 @@ class SyllabusRepository(
             .header("Referer", "$SYLLABUS_BASE/syllabus/s/")
             .build()
 
-        http.newCall(request).execute().use { resp ->
-            if (!resp.isSuccessful) return@use emptyList()
-            val raw = resp.body?.string() ?: return@use emptyList()
-            // Aura応答は "*/{...}/*ERROR*/" のようなガード付きの場合がある
-            val start = raw.indexOf('{')
-            if (start < 0) return@use emptyList()
-            val root = runCatching { json.parseToJsonElement(cleanAuraJson(raw.substring(start))) }
-                .getOrNull()?.jsonObject ?: return@use emptyList()
-
-            val actionResult = root["actions"]?.jsonArray?.firstOrNull()?.jsonObject
-                ?: return@use emptyList() // exceptionEvent等
-            if (actionResult["state"]?.jsonPrimitive?.content != "SUCCESS") return@use emptyList()
-            val result = actionResult["returnValue"]?.jsonObject
-                ?.get("returnValue")?.jsonObject
-                ?.get("result")?.jsonArray ?: return@use emptyList()
-            result.mapNotNull { el ->
-                runCatching { json.decodeFromJsonElement(SyllabusRecord.serializer(), el) }.getOrNull()
+        runCatching {
+            http.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext SyllabusSearchResult.NetworkError(resp.code)
+                val raw = resp.body?.string() ?: return@withContext SyllabusSearchResult.InvalidResponse
+                parseRecords(raw)
             }
-        }
+        }.getOrElse { SyllabusSearchResult.NetworkError() }
     }
 
-    /** 授業コード(5桁) → シラバス詳細URL。直接API → 外部resolverの順に解決し、キャッシュする。 */
     suspend fun resolveUrl(courseCode: String, year: Int = academicYear()): String? {
-        store.syllabusCache()[courseCode]?.let { return it }
+        val cacheKey = store.syllabusCacheKey(courseCode, year)
+        store.syllabusCache()[cacheKey]?.let { return it }
 
-        // 1. 直接API: コードで検索し、コース名が "コード:" で始まるレコードを採用
-        val record = runCatching { search(keyword = courseCode, year = year, limits = 10) }
-            .getOrDefault(emptyList())
-            .firstOrNull { it.courseCode == courseCode }
-        if (record != null) {
-            val url = detailUrl(record.id, year, courseCode)
-            store.saveSyllabusUrl(courseCode, url)
-            return url
-        }
-
-        // 2. フォールバック: Moodle-Schedule-Extension作者のWorker
-        return resolveViaWorker(courseCode)
+        val result = searchResult(keyword = courseCode, year = year, limits = 10)
+        val record = (result as? SyllabusSearchResult.Success)
+            ?.records
+            ?.firstOrNull { it.courseCode == courseCode }
+            ?: return null
+        val url = detailUrl(record.id, year, courseCode)
+        store.saveSyllabusUrl(courseCode, year, url)
+        return url
     }
 
-    /** 検索結果レコードからシラバス詳細URLを組み立てる */
     fun detailUrl(record: SyllabusRecord, year: Int = academicYear(), lang: String = "ja"): String? {
         val code = record.courseCode ?: return null
         return detailUrl(record.id, year, code, lang)
@@ -164,38 +150,44 @@ class SyllabusRepository(
     private fun detailUrl(recordId: String, year: Int, code: String, lang: String = "ja"): String =
         "$SYLLABUS_BASE/syllabus/s/r-syllabus/$recordId/$year$code?language=$lang"
 
-    private suspend fun resolveViaWorker(courseCode: String): String? = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("$fallbackResolverUrl/syllabus?code=$courseCode")
-            .get()
-            .build()
-        runCatching {
-            http.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return@use null
-                val url = resp.body?.string()?.trim()
-                if (url != null && url.startsWith("https://")) {
-                    store.saveSyllabusUrl(courseCode, url)
-                    url
-                } else null
-            }
-        }.getOrNull()
+    private fun parseRecords(raw: String): SyllabusSearchResult {
+        val start = raw.indexOf('{')
+        if (start < 0) return SyllabusSearchResult.InvalidResponse
+        val root = runCatching { json.parseToJsonElement(cleanAuraJson(raw.substring(start))) }
+            .getOrNull()
+            ?.jsonObject
+            ?: return SyllabusSearchResult.InvalidResponse
+
+        val actionResult = root["actions"]?.jsonArray?.firstOrNull()?.jsonObject
+            ?: return SyllabusSearchResult.InvalidResponse
+        if (actionResult["state"]?.jsonPrimitive?.content != "SUCCESS") {
+            return SyllabusSearchResult.InvalidResponse
+        }
+        val result = actionResult["returnValue"]?.jsonObject
+            ?.get("returnValue")?.jsonObject
+            ?.get("result")?.jsonArray
+            ?: return SyllabusSearchResult.InvalidResponse
+        val records = result.mapNotNull { el ->
+            runCatching { json.decodeFromJsonElement(SyllabusRecord.serializer(), el) }.getOrNull()
+        }
+        return if (records.isEmpty()) SyllabusSearchResult.NoResults else SyllabusSearchResult.Success(records)
     }
 
     companion object {
         const val SYLLABUS_BASE = "https://syllabus.ritsumei.ac.jp"
         const val SYLLABUS_SEARCH_URL = "$SYLLABUS_BASE/syllabus/s/?language=ja"
-        const val FALLBACK_RESOLVER = "https://withered-salad-b4aa.yudai-syllabus.workers.dev"
 
-        // Cookieなしゲスト呼び出しではfwuidは検証されない (2026-07確認)。
-        // 将来チェックが入った場合はトップページの
-        // /sfsites/auraFW/javascript/{fwuid}/aura_prod.js から動的取得すること。
-        const val FWUID = "cmpKNldRZXRSMkdjemxQdjBkbl9uQWtVMjdnTGFERUU2S3FfSVdrcU92bkExNC4xOTIuODM4ODYwOA"
+        object AuraConfig {
+            const val FWUID =
+                "cmpKNldRZXRSMkdjemxQdjBkbl9uQWtVMjdnTGFERUU2S3FfSVdrcU92bkExNC4xOTIuODM4ODYwOA"
+        }
 
-        /** 4月始まりの学年暦 (1〜3月は前年扱い) */
+        val FWUID: String
+            get() = AuraConfig.FWUID
+
         fun academicYear(today: LocalDate = LocalDate.now()): Int =
             if (today.monthValue >= 4) today.year else today.year - 1
 
-        // Aura応答末尾のコメント形式ガード ( ERROR マーカー) を除去
         internal fun cleanAuraJson(s: String): String =
             s.removeSuffix("/*ERROR*/").trim()
     }
