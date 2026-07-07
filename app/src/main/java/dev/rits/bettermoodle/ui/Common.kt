@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.rits.bettermoodle.data.UrlPolicy
 
 sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
@@ -57,6 +58,8 @@ fun ErrorBox(message: String, onRetry: (() -> Unit)? = null) {
 }
 
 /** Chrome Custom Tab でURLを開く */
-fun openInCustomTab(context: Context, url: String) {
+fun openInCustomTab(context: Context, url: String): Boolean {
+    if (!UrlPolicy.canOpenExternally(url)) return false
     CustomTabsIntent.Builder().build().launchUrl(context, Uri.parse(url))
+    return true
 }

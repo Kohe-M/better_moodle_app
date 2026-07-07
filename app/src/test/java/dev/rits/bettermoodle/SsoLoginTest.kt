@@ -5,16 +5,17 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.Base64
 
 class SsoLoginTest {
 
-    private val passport = "123.456"
+    private val passport = "0123456789abcdef0123456789abcdef"
     private val signature = md5("https://lms.ritsumei.ac.jp$passport")
 
     @Test
-    fun `launch URLにpassportとschemeが含まれる`() {
+    fun `launch URL contains passport and fixed scheme`() {
         val url = SsoLogin.launchUrl(passport)
         assertTrue(url.startsWith("https://lms.ritsumei.ac.jp/admin/tool/mobile/launch.php?"))
         assertTrue("passport=$passport" in url)
@@ -23,42 +24,46 @@ class SsoLoginTest {
     }
 
     @Test
-    fun `サーバ強制のmoodlemobileスキームでもトークンを取り出せる`() {
-        // lms.ritsumei.ac.jp は urlscheme パラメータを無視して moodlemobile を強制する
-        val payload = encode("$signature:::aabbccddeeff00112233:::privateTokenValue")
-        val tokens = SsoLogin.parseTokenUrl("moodlemobile://token=$payload", passport)!!
-        assertEquals("aabbccddeeff00112233", tokens.wsToken)
-        assertEquals("privateTokenValue", tokens.privateToken)
-    }
-
-    @Test
-    fun `自前スキームでもトークンを取り出せる`() {
-        val payload = encode("$signature:::aabbccddeeff00112233")
+    fun `accepts signed bettermoodle callback`() {
+        val payload = encode("$signature:::aabbccddeeff00112233:::ignoredPrivateToken")
         val tokens = SsoLogin.parseTokenUrl("bettermoodle://token=$payload", passport)!!
         assertEquals("aabbccddeeff00112233", tokens.wsToken)
-        assertNull(tokens.privateToken)
+        assertEquals("ignoredPrivateToken", tokens.privateToken)
     }
 
     @Test
-    fun `署名不一致でもmd5形式ならトークンを受け入れる`() {
-        val otherSig = md5("something else")
-        val payload = encode("$otherSig:::aabbccddeeff00112233")
-        val tokens = SsoLogin.parseTokenUrl("moodlemobile://token=$payload", passport)
-        assertEquals("aabbccddeeff00112233", tokens?.wsToken)
+    fun `rejects moodlemobile callback`() {
+        val payload = encode("$signature:::aabbccddeeff00112233")
+        assertNull(SsoLogin.parseTokenUrl("moodlemobile://token=$payload", passport))
     }
 
     @Test
-    fun `不正なURLやペイロードはnull`() {
+    fun `rejects signature mismatch`() {
+        val payload = encode("${md5("other")}:::aabbccddeeff00112233")
+        assertNull(SsoLogin.parseTokenUrl("bettermoodle://token=$payload", passport))
+    }
+
+    @Test
+    fun `rejects malformed callbacks`() {
         assertNull(SsoLogin.parseTokenUrl("https://lms.ritsumei.ac.jp/my/", passport))
-        assertNull(SsoLogin.parseTokenUrl("moodlemobile://token=abc", passport))
-        assertNull(SsoLogin.parseTokenUrl("moodlemobile://token=" + encode("no-separator"), passport))
-        // 署名部がmd5形式ですらない場合は拒否
-        assertNull(SsoLogin.parseTokenUrl("moodlemobile://token=" + encode("bad:::aabbccddeeff00112233"), passport))
+        assertNull(SsoLogin.parseTokenUrl("bettermoodle://token=abc", passport))
+        assertNull(SsoLogin.parseTokenUrl("bettermoodle://token=" + encode("no-separator"), passport))
+        assertNull(SsoLogin.parseTokenUrl("bettermoodle://token=" + encode("bad:::short"), passport))
     }
 
     @Test
-    fun `passportは毎回異なる`() {
-        assertTrue(SsoLogin.newPassport() != SsoLogin.newPassport())
+    fun `accepts URL encoded payload`() {
+        val payload = URLEncoder.encode(encode("$signature:::aabbccddeeff00112233"), "UTF-8")
+        val tokens = SsoLogin.parseTokenUrl("bettermoodle://token=$payload", passport)!!
+        assertEquals("aabbccddeeff00112233", tokens.wsToken)
+    }
+
+    @Test
+    fun `passport has at least 128 bits of entropy material`() {
+        val first = SsoLogin.newPassport()
+        val second = SsoLogin.newPassport()
+        assertTrue(first != second)
+        assertTrue(first.length >= 32)
     }
 
     private fun encode(s: String): String = Base64.getEncoder().encodeToString(s.toByteArray())

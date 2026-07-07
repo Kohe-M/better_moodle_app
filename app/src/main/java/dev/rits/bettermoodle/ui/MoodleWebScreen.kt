@@ -6,49 +6,44 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.rits.bettermoodle.data.UrlPolicy
-import kotlinx.coroutines.launch
 
-/**
- * 立命館スチューデントポータル (Salesforce Experience Cloud) を
- * アプリ内WebViewで表示。Microsoft SSOのセッションCookieは永続化される。
- */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun PortalScreen(onClearSession: suspend () -> Unit = {}) {
-    val scope = rememberCoroutineScope()
+fun MoodleWebScreen(
+    url: String,
+    onBack: () -> Unit,
+) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
 
-    BackHandler(enabled = canGoBack) {
-        webView?.goBack()
+    BackHandler {
+        val view = webView
+        if (view?.canGoBack() == true) view.goBack() else onBack()
     }
 
-    Column(Modifier.fillMaxSize()) {
-        TextButton(onClick = {
-            scope.launch {
-                onClearSession()
-                webView?.clearCache(true)
-                webView?.loadUrl(PORTAL_URL)
-            }
-        }, modifier = Modifier.fillMaxWidth()) {
-            Text("ポータルセッションを削除")
-        }
+    if (!UrlPolicy.isAllowedMoodleWebViewUrl(url)) {
+        ErrorBox("This Moodle URL cannot be opened safely.", onRetry = null)
+        return
+    }
+
+    Box(Modifier.fillMaxSize()) {
         AndroidView(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxSize(),
             factory = { context ->
                 WebView(context).apply {
                     settings.javaScriptEnabled = true
@@ -63,23 +58,30 @@ fun PortalScreen(onClearSession: suspend () -> Unit = {}) {
                             view: WebView?,
                             request: WebResourceRequest?,
                         ): Boolean {
-                            val url = request?.url?.toString() ?: return true
-                            if (UrlPolicy.isAllowedPortalWebViewUrl(url)) return false
-                            if (UrlPolicy.canOpenExternally(url)) openInCustomTab(context, url)
+                            val target = request?.url?.toString() ?: return true
+                            if (UrlPolicy.isAllowedMoodleWebViewUrl(target)) return false
+                            error = "Blocked non-Moodle or unsafe navigation."
                             return true
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
+                            loading = false
                             canGoBack = view?.canGoBack() == true
                             CookieManager.getInstance().flush()
                         }
                     }
-                    loadUrl(PORTAL_URL)
+                    loadUrl(url)
                     webView = this
                 }
             },
         )
+        if (loading) LinearProgressIndicator(Modifier.align(Alignment.TopCenter))
+        error?.let {
+            Text(
+                it,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.error,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
     }
 }
-
-private const val PORTAL_URL = "https://sp.ritsumei.ac.jp/studentportal/s/"

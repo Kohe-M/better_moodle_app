@@ -3,6 +3,9 @@ package dev.rits.bettermoodle
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.webkit.CookieManager
+import android.webkit.WebStorage
+import androidx.core.app.NotificationCompat
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -11,8 +14,9 @@ import dev.rits.bettermoodle.data.MoodleRepository
 import dev.rits.bettermoodle.data.SessionStore
 import dev.rits.bettermoodle.data.SyllabusRepository
 import dev.rits.bettermoodle.work.DeadlineWorker
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
 class App : Application() {
@@ -32,7 +36,10 @@ class App : Application() {
             DEADLINE_CHANNEL_ID,
             "課題の締切",
             NotificationManager.IMPORTANCE_HIGH,
-        ).apply { description = "課題・小テストの締切リマインダー" }
+        ).apply {
+            description = "課題・小テストの締切リマインダー"
+            lockscreenVisibility = NotificationCompat.VISIBILITY_PRIVATE
+        }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
@@ -55,12 +62,51 @@ class AppContainer(private val app: Application) {
         kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
     )
     val sessionStore = SessionStore(app)
+    @Volatile private var currentToken: String? = null
     val moodleClient = MoodleClient(
-        tokenProvider = { runBlocking { sessionStore.token() } },
-        onAuthError = { appScope.launch { sessionStore.clearAuthTokens() } },
+        tokenProvider = { currentToken },
+        onAuthError = { appScope.launch { clearAuthTokens() } },
     )
     val moodleRepository = MoodleRepository(moodleClient)
     val syllabusRepository = SyllabusRepository(sessionStore)
 
+    init {
+        appScope.launch {
+            sessionStore.tokenFlow.collect { currentToken = it }
+        }
+    }
+
     fun appContext(): android.content.Context = app
+
+    suspend fun syncTokenCache() {
+        currentToken = sessionStore.token()
+    }
+
+    suspend fun logout() {
+        sessionStore.logout()
+        clearWebViewSession()
+        currentToken = null
+    }
+
+    suspend fun clearAuthTokens() {
+        sessionStore.clearAuthTokens()
+        currentToken = null
+        clearMoodleWebSession()
+    }
+
+    suspend fun clearPortalSession() {
+        clearPortalWebSession()
+    }
+
+    private suspend fun clearMoodleWebSession() = clearWebViewSession()
+
+    private suspend fun clearPortalWebSession() = clearWebViewSession()
+
+    private suspend fun clearWebViewSession() = withContext(Dispatchers.Main) {
+        runCatching {
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+        }
+        runCatching { WebStorage.getInstance().deleteAllData() }
+    }
 }

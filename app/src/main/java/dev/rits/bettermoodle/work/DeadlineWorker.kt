@@ -29,6 +29,7 @@ class DeadlineWorker(
         val app = applicationContext as App
         val store = app.container.sessionStore
         if (store.token() == null) return Result.success() // 未ログイン
+        app.container.syncTokenCache()
 
         val now = Instant.now().epochSecond
         val deadlines = runCatching {
@@ -58,6 +59,7 @@ class DeadlineWorker(
                     .setContentText("${event.course?.fullname ?: ""} — ${fmt.format(Instant.ofEpochSecond(event.timesort))} まで")
                     .setContentIntent(pending)
                     .setAutoCancel(true)
+                    .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                     .build()
                 manager.notify(event.id.toInt(), notification)
             }

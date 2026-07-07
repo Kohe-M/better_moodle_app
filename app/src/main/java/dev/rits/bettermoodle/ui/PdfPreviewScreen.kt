@@ -23,8 +23,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -33,11 +36,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
+import dev.rits.bettermoodle.data.UrlPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import kotlin.math.sqrt
 
 private sealed interface PdfState {
     data object Loading : PdfState
@@ -66,10 +71,19 @@ fun PdfPreviewScreen(
 ) {
     val context = LocalContext.current
 
-    val state by produceState<PdfState>(PdfState.Loading, fileUrl) {
-        value = withContext(Dispatchers.IO) {
+    var state by remember(fileUrl) { mutableStateOf<PdfState>(PdfState.Loading) }
+    LaunchedEffect(fileUrl) {
+        state = PdfState.Loading
+        state = withContext(Dispatchers.IO) {
             runCatching {
-                val authed = container.moodleRepository.authedFileUrl(fileUrl) ?: fileUrl
+                if (!UrlPolicy.isSafeMoodlePluginFileSourceUrl(fileUrl)) {
+                    throw java.io.IOException("許可されていないPDF URLです")
+                }
+                val authed = container.moodleRepository.authedFileUrl(fileUrl)
+                    ?: throw java.io.IOException("PDFの認証URLを作成できませんでした")
+                if (!UrlPolicy.isAllowedMoodlePluginFileUrl(authed)) {
+                    throw java.io.IOException("許可されていないPDF URLです")
+                }
                 val file = downloadToCache(context.cacheDir, authed)
                 inspectPdf(file)
             }.getOrElse { PdfState.Failed(it.message ?: "PDFを表示できませんでした") }
@@ -125,15 +139,51 @@ fun PdfPreviewScreen(
 }
 
 private val downloadHttp = OkHttpClient()
+private const val MAX_PDF_BYTES = 30L * 1024L * 1024L
+private const val MAX_BITMAP_PIXELS = 4_000_000
 
 private fun downloadToCache(cacheDir: File, url: String): File {
-    val out = File(cacheDir, "preview_${url.hashCode()}.pdf")
-    downloadHttp.newCall(Request.Builder().url(url).build()).execute().use { resp ->
-        if (!resp.isSuccessful) throw java.io.IOException("HTTP ${resp.code}")
-        val body = resp.body ?: throw java.io.IOException("空のレスポンス")
-        out.outputStream().use { body.byteStream().copyTo(it) }
+    val tmp = File.createTempFile("preview_", ".tmp", cacheDir)
+    val out = File.createTempFile("preview_", ".pdf", cacheDir).also { it.delete() }
+    return runCatching {
+        downloadHttp.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+            if (!resp.isSuccessful) throw java.io.IOException("HTTP ${resp.code}")
+            val body = resp.body ?: throw java.io.IOException("空のレスポンス")
+            val length = body.contentLength()
+            if (length > MAX_PDF_BYTES) throw java.io.IOException("PDFが大きすぎます")
+
+            var copied = 0L
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            body.byteStream().use { input ->
+                tmp.outputStream().use { output ->
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        copied += read
+                        if (copied > MAX_PDF_BYTES) throw java.io.IOException("PDFが大きすぎます")
+                        output.write(buffer, 0, read)
+                    }
+                }
+            }
+        }
+        if (!looksLikePdf(tmp)) throw java.io.IOException("PDFではないレスポンスです")
+        if (!tmp.renameTo(out)) {
+            tmp.copyTo(out, overwrite = true)
+            tmp.delete()
+        }
+        out
+    }.getOrElse { error ->
+        tmp.delete()
+        out.delete()
+        throw error
     }
-    return out
+}
+
+private fun looksLikePdf(file: File): Boolean {
+    val prefix = ByteArray(8)
+    val read = file.inputStream().use { it.read(prefix) }
+    if (read < 5) return false
+    return prefix.decodeToString(0, read).trimStart().startsWith("%PDF-")
 }
 
 private fun inspectPdf(file: File, maxPages: Int = 40): PdfState {
@@ -152,8 +202,10 @@ private fun inspectPdf(file: File, maxPages: Int = 40): PdfState {
 
 @Composable
 private fun PdfPage(file: File, pageIndex: Int, totalPages: Int) {
-    val pageState by produceState<PdfPageState>(PdfPageState.Loading, file, pageIndex) {
-        value = withContext(Dispatchers.IO) {
+    var pageState by remember(file, pageIndex) { mutableStateOf<PdfPageState>(PdfPageState.Loading) }
+    LaunchedEffect(file, pageIndex) {
+        pageState = PdfPageState.Loading
+        pageState = withContext(Dispatchers.IO) {
             runCatching {
                 PdfPageState.Ready(renderPdfPage(file, pageIndex))
             }.getOrElse { PdfPageState.Failed(it.message ?: "ページを表示できませんでした") }
@@ -199,8 +251,12 @@ private fun renderPdfPage(file: File, pageIndex: Int, targetWidth: Int = 1240): 
         PdfRenderer(pfd).use { renderer ->
             require(pageIndex in 0 until renderer.pageCount) { "ページ番号が範囲外です" }
             renderer.openPage(pageIndex).use { page ->
-                val height = (targetWidth.toFloat() * page.height / page.width).toInt().coerceAtLeast(1)
-                val bmp = Bitmap.createBitmap(targetWidth, height, Bitmap.Config.ARGB_8888)
+                val scaleForWidth = targetWidth.toDouble() / page.width.toDouble()
+                val scaleForPixels = sqrt(MAX_BITMAP_PIXELS.toDouble() / (page.width.toDouble() * page.height.toDouble()))
+                val scale = minOf(scaleForWidth, scaleForPixels, 1.0).coerceAtLeast(0.1)
+                val width = (page.width * scale).toInt().coerceAtLeast(1)
+                val height = (page.height * scale).toInt().coerceAtLeast(1)
+                val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 bmp.eraseColor(Color.WHITE)
                 page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                 return bmp

@@ -1,6 +1,7 @@
 package dev.rits.bettermoodle.ui
 
 import android.annotation.SuppressLint
+import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -23,10 +24,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import dev.rits.bettermoodle.BuildConfig
 import dev.rits.bettermoodle.auth.SsoLogin
+import dev.rits.bettermoodle.data.UrlPolicy
 
 /**
  * ログイン画面。
@@ -48,6 +52,10 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                 WebView(context).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    settings.safeBrowsingEnabled = true
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(
                             view: WebView?,
@@ -61,7 +69,7 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                             }
                             // moodlemobile:// などhttp以外のスキームはWebViewに渡さない
                             // (ERR_UNKNOWN_URL_SCHEME 防止)
-                            return !url.startsWith("http://") && !url.startsWith("https://")
+                            return !UrlPolicy.isAllowedSsoWebViewUrl(url)
                         }
                     }
                     loadUrl(SsoLogin.launchUrl(passport))
@@ -89,28 +97,31 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
         Button(onClick = { showWebView = true }, modifier = Modifier.fillMaxWidth()) {
             Text("立命館アカウントでログイン")
         }
-        Spacer(Modifier.height(16.dp))
-        OutlinedButton(onClick = { showManual = !showManual }, modifier = Modifier.fillMaxWidth()) {
-            Text("トークンを手動入力 (上級者向け)")
-        }
-        if (showManual) {
+        if (BuildConfig.DEBUG) {
             Spacer(Modifier.height(16.dp))
-            OutlinedTextField(
-                value = manualToken,
-                onValueChange = { manualToken = it },
-                label = { Text("Moodleモバイルサービストークン") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    if (manualToken.isNotBlank()) {
-                        onToken(SsoLogin.Tokens(manualToken.trim(), null))
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("このトークンでログイン")
+            OutlinedButton(onClick = { showManual = !showManual }, modifier = Modifier.fillMaxWidth()) {
+                Text("トークンを手動入力 (debug)")
+            }
+            if (showManual) {
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = manualToken,
+                    onValueChange = { manualToken = it },
+                    label = { Text("Moodleモバイルサービストークン") },
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        if (manualToken.isNotBlank()) {
+                            onToken(SsoLogin.Tokens(manualToken.trim(), null))
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("このトークンでログイン")
+                }
             }
         }
     }
