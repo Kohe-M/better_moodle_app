@@ -17,7 +17,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.ActionEvent
@@ -31,11 +30,13 @@ import java.time.format.DateTimeFormatter
  * core_calendar_get_action_events_by_timesort を assign/quiz 等に絞って表示。
  */
 @Composable
-fun DeadlinesScreen(container: AppContainer) {
+fun DeadlinesScreen(
+    container: AppContainer,
+    onOpenUrl: (url: String, title: String) -> Unit = { _, _ -> },
+) {
     val (state, refresh) = rememberLoadable {
         container.moodleRepository.upcomingDeadlines(Instant.now().epochSecond - 3600)
     }
-    val context = LocalContext.current
 
     when (val s = state) {
         is UiState.Loading -> LoadingBox()
@@ -65,7 +66,9 @@ fun DeadlinesScreen(container: AppContainer) {
                     items(events, key = { it.id }) { event ->
                         DeadlineCard(event) {
                             val url = event.action?.url?.takeIf { it.isNotBlank() } ?: event.url
-                            if (!url.isNullOrBlank()) openInCustomTab(context, url)
+                            if (!url.isNullOrBlank()) {
+                                onOpenUrl(url, event.activityname ?: event.name)
+                            }
                         }
                     }
                 }

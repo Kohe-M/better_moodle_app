@@ -49,14 +49,95 @@ class MoodleRepository(
     suspend fun courseContents(courseId: Long): List<CourseSection> =
         client.callAs("core_course_get_contents", mapOf("courseid" to courseId.toString()))
 
+    suspend fun assignments(courseId: Long): List<Assignment> {
+        val resp: AssignmentsResponse = client.callAs(
+            "mod_assign_get_assignments",
+            mapOf("courseids[0]" to courseId.toString()),
+        )
+        return resp.courses.flatMap { it.assignments }
+    }
+
+    suspend fun assignment(courseId: Long, cmid: Long, assignId: Long): Assignment? =
+        assignments(courseId).firstOrNull { it.id == assignId || it.cmid == cmid }
+
+    suspend fun assignmentStatus(assignId: Long): SubmissionStatusResponse =
+        client.callAs("mod_assign_get_submission_status", mapOf("assignid" to assignId.toString()))
+
+    suspend fun startAssignmentSubmission(assignId: Long) {
+        client.call("mod_assign_start_submission", mapOf("assignid" to assignId.toString()))
+    }
+
+    suspend fun saveOnlineTextSubmission(assignId: Long, htmlText: String) {
+        client.call(
+            "mod_assign_save_submission",
+            mapOf(
+                "assignid" to assignId.toString(),
+                "plugindata[onlinetext_editor][text]" to htmlText,
+                "plugindata[onlinetext_editor][format]" to "1",
+                "plugindata[onlinetext_editor][itemid]" to "0",
+            ),
+        )
+    }
+
+    suspend fun saveFileSubmission(assignId: Long, itemId: Long) {
+        client.call(
+            "mod_assign_save_submission",
+            mapOf(
+                "assignid" to assignId.toString(),
+                "plugindata[files_filemanager]" to itemId.toString(),
+            ),
+        )
+    }
+
+    suspend fun submitAssignmentForGrading(assignId: Long, acceptSubmissionStatement: Boolean) {
+        client.call(
+            "mod_assign_submit_for_grading",
+            mapOf(
+                "assignid" to assignId.toString(),
+                "acceptsubmissionstatement" to if (acceptSubmissionStatement) "1" else "0",
+            ),
+        )
+    }
+
+    suspend fun uploadSubmissionFile(file: java.io.File, filename: String): UploadedFile {
+        val uploaded = client.uploadFile(file, filename)
+        val first = uploaded.firstOrNull() ?: throw MoodleWsException("uploadfailed", "Upload returned no file")
+        if (first.itemid <= 0) throw MoodleWsException("uploadfailed", "Upload did not return a draft item ID")
+        return first
+    }
+
+    suspend fun forumDiscussions(forumInstanceId: Long): List<ForumDiscussion> {
+        require(forumInstanceId > 0L) { "Invalid forum instance ID" }
+        val resp: ForumDiscussionsResponse = client.callAs(
+            "mod_forum_get_forum_discussions",
+            forumDiscussionsParams(forumInstanceId),
+        )
+        return resp.discussions
+    }
+
+    suspend fun forumPosts(discussionId: Long): List<ForumPost> {
+        require(discussionId > 0L) { "Invalid discussion ID" }
+        val resp: ForumPostsResponse = client.callAs(
+            "mod_forum_get_discussion_posts",
+            forumPostsParams(discussionId),
+        )
+        client.call(
+            "mod_forum_view_forum_discussion",
+            forumPostsParams(discussionId),
+        )
+        return resp.posts
+    }
+
     /**
      * ブラウザで開くための自動ログインURLを生成する。
      * tool_mobile_get_autologin_key はレート制限 (数分に1回) があるため、
      * 失敗時は呼び出し側で元URLにフォールバックすること。
      */
     suspend fun autologinUrl(targetUrl: String): String? = runCatching {
+        if (!UrlPolicy.canUseMoodleAutologin(targetUrl)) return null
         val key: AutologinKey = client.callAs("tool_mobile_get_autologin_key")
         if (key.autologinurl.isBlank() || key.key.isBlank()) return null
+        if (!UrlPolicy.isAllowedMoodleUrl(key.autologinurl)) return null
         val encoded = java.net.URLEncoder.encode(targetUrl, "UTF-8")
         "${key.autologinurl}?key=${key.key}&urltogo=$encoded"
     }.getOrNull()
@@ -80,6 +161,15 @@ class MoodleRepository(
 
     companion object {
         val DEADLINE_MODULES = setOf("assign", "quiz", "workshop", "lesson")
+
+        fun forumDiscussionsParams(forumInstanceId: Long): Map<String, String> =
+            mapOf(
+                "forumid" to forumInstanceId.toString(),
+                "sortorder" to "timemodified DESC",
+            )
+
+        fun forumPostsParams(discussionId: Long): Map<String, String> =
+            mapOf("discussionid" to discussionId.toString())
         private val DAY_CHARS = listOf("月", "火", "水", "木", "金", "土", "日")
 
         /**

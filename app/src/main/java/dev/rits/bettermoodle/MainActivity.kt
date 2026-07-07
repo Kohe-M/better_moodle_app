@@ -9,10 +9,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.CalendarViewMonth
-import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.AlertDialog
@@ -37,15 +37,23 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.rits.bettermoodle.auth.SsoLogin
+import dev.rits.bettermoodle.data.ForumTarget
+import dev.rits.bettermoodle.data.PreviewKind
+import dev.rits.bettermoodle.data.UrlPolicy
+import dev.rits.bettermoodle.ui.AssignmentScreen
 import dev.rits.bettermoodle.ui.CourseScreen
 import dev.rits.bettermoodle.ui.DeadlinesScreen
+import dev.rits.bettermoodle.ui.FilePreviewScreen
+import dev.rits.bettermoodle.ui.ForumScreen
 import dev.rits.bettermoodle.ui.LoginScreen
+import dev.rits.bettermoodle.ui.MoodleWebScreen
 import dev.rits.bettermoodle.ui.NotificationsScreen
 import dev.rits.bettermoodle.ui.PdfPreviewScreen
 import dev.rits.bettermoodle.ui.PortalScreen
@@ -109,6 +117,19 @@ private fun Root(container: AppContainer) {
                 onOpenPdf = { url, title ->
                     rootNav.navigate("pdf?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
                 },
+                onOpenAssignment = { moduleId, assignId, title ->
+                    rootNav.navigate(
+                        "assignment/$id/$moduleId/$assignId?title=${Uri.encode(title)}",
+                    )
+                },
+                onOpenForum = { target, title ->
+                    rootNav.navigate(
+                        forumRoute(target, title),
+                    )
+                },
+                onOpenMoodleWeb = { url, title ->
+                    rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
+                },
             )
         }
 
@@ -121,9 +142,78 @@ private fun Root(container: AppContainer) {
                 title = title,
                 onBack = { rootNav.popBackStack() },
                 onOpenExternally = {
-                    val authed = container.moodleRepository.authedFileUrl(url) ?: url
-                    openInCustomTab(context, authed)
+                    openInCustomTab(context, url)
                 },
+            )
+        }
+
+        composable("assignment/{courseId}/{moduleId}/{assignId}?title={title}") { entry ->
+            AssignmentScreen(
+                container = container,
+                courseId = entry.arguments?.getString("courseId")?.toLongOrNull() ?: 0L,
+                moduleId = entry.arguments?.getString("moduleId")?.toLongOrNull() ?: 0L,
+                assignId = entry.arguments?.getString("assignId")?.toLongOrNull() ?: 0L,
+                title = entry.arguments?.getString("title") ?: "Assignment",
+                onBack = { rootNav.popBackStack() },
+                onOpenFilePreview = { file ->
+                    val url = file.sourceUrl ?: return@AssignmentScreen
+                    when (file.previewKind) {
+                        PreviewKind.Pdf -> rootNav.navigate(
+                            "pdf?url=${Uri.encode(url)}&title=${Uri.encode(file.filename)}",
+                        )
+                        PreviewKind.Image,
+                        PreviewKind.Text,
+                        -> rootNav.navigate(
+                            "filePreview?url=${Uri.encode(url)}" +
+                                "&title=${Uri.encode(file.filename)}" +
+                                "&kind=${Uri.encode(file.previewKind.name)}",
+                        )
+                        PreviewKind.Unsupported -> Unit
+                    }
+                },
+            )
+        }
+
+        composable("filePreview?url={url}&title={title}&kind={kind}") { entry ->
+            val kind = runCatching {
+                PreviewKind.valueOf(entry.arguments?.getString("kind").orEmpty())
+            }.getOrDefault(PreviewKind.Unsupported)
+            FilePreviewScreen(
+                container = container,
+                fileUrl = entry.arguments?.getString("url").orEmpty(),
+                title = entry.arguments?.getString("title") ?: "Preview",
+                kind = kind,
+                onBack = { rootNav.popBackStack() },
+            )
+        }
+
+        composable("forum?courseId={courseId}&courseModuleId={courseModuleId}&forumInstanceId={forumInstanceId}&contextId={contextId}&modName={modName}&title={title}&url={url}") { entry ->
+            val target = ForumTarget(
+                courseId = entry.arguments?.getString("courseId")?.toLongOrNull() ?: 0L,
+                courseModuleId = entry.arguments?.getString("courseModuleId")?.toLongOrNull() ?: 0L,
+                forumInstanceId = entry.arguments?.getString("forumInstanceId")?.toLongOrNull() ?: 0L,
+                contextId = entry.arguments?.getString("contextId")?.toLongOrNull()?.takeIf { it > 0L },
+                modName = entry.arguments?.getString("modName").orEmpty(),
+                url = entry.arguments?.getString("url")?.takeIf { it.isNotBlank() },
+            )
+            ForumScreen(
+                container = container,
+                target = target,
+                title = entry.arguments?.getString("title") ?: "Forum",
+                onBack = { rootNav.popBackStack() },
+                onFallbackWeb = {
+                    val url = target.url
+                    if (!url.isNullOrBlank()) {
+                        rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("Forum")}")
+                    }
+                },
+            )
+        }
+
+        composable("moodleWeb?url={url}&title={title}") { entry ->
+            MoodleWebScreen(
+                url = entry.arguments?.getString("url").orEmpty(),
+                onBack = { rootNav.popBackStack() },
             )
         }
     }
@@ -142,10 +232,20 @@ private data class NavItem(
     val icon: ImageVector,
 )
 
+private fun forumRoute(target: ForumTarget, title: String): String =
+    "forum?courseId=${target.courseId}" +
+        "&courseModuleId=${target.courseModuleId}" +
+        "&forumInstanceId=${target.forumInstanceId}" +
+        "&contextId=${target.contextId ?: 0L}" +
+        "&modName=${Uri.encode(target.modName)}" +
+        "&title=${Uri.encode(title)}" +
+        "&url=${Uri.encode(target.url.orEmpty())}"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var showLogout by remember { mutableStateOf(false) }
 
     val navController = rememberNavController()
@@ -163,13 +263,21 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
         rootNav.navigate("course/$id?name=${Uri.encode(name)}&code=${Uri.encode(code ?: "")}")
     }
 
+    fun openUrl(url: String, title: String) {
+        when {
+            UrlPolicy.isAllowedMoodleWebViewUrl(url) ->
+                rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
+            UrlPolicy.canOpenExternally(url) -> openInCustomTab(context, url)
+        }
+    }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(items.firstOrNull { it.route == currentRoute }?.label ?: "Moodle+R") },
                 actions = {
                     IconButton(onClick = { showLogout = true }) {
-                        Icon(Icons.Filled.Logout, contentDescription = "ログアウト")
+                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "ログアウト")
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -208,10 +316,14 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
             modifier = Modifier.padding(padding),
         ) {
             composable("timetable") { TimetableScreen(container, onOpenCourse = ::openCourse) }
-            composable("deadlines") { DeadlinesScreen(container) }
-            composable("notifications") { NotificationsScreen(container) }
+            composable("deadlines") { DeadlinesScreen(container, onOpenUrl = ::openUrl) }
+            composable("notifications") { NotificationsScreen(container, onOpenUrl = ::openUrl) }
             composable("syllabus") { SyllabusScreen(container) }
-            composable("portal") { PortalScreen() }
+            composable("portal") {
+                PortalScreen(onClearSession = {
+                    container.clearPortalSession()
+                })
+            }
         }
     }
 
@@ -223,7 +335,7 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
             confirmButton = {
                 TextButton(onClick = {
                     showLogout = false
-                    scope.launch { container.sessionStore.logout() }
+                    scope.launch { container.logout() }
                 }) { Text("ログアウト") }
             },
             dismissButton = {

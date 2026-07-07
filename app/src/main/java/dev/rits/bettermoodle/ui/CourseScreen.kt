@@ -15,28 +15,32 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.Assignment
 import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -46,8 +50,10 @@ import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.CourseModule
 import dev.rits.bettermoodle.data.CourseSection
+import dev.rits.bettermoodle.data.ForumTarget
+import dev.rits.bettermoodle.data.UrlPolicy
+import dev.rits.bettermoodle.data.toForumTarget
 import kotlinx.coroutines.launch
-import org.jsoup.Jsoup
 
 /**
  * アプリ内コース画面。core_course_get_contents のセクション/アクティビティを表示。
@@ -64,12 +70,26 @@ fun CourseScreen(
     courseCode: String?,
     onBack: () -> Unit,
     onOpenPdf: (fileUrl: String, title: String) -> Unit,
+    onOpenAssignment: (moduleId: Long, assignId: Long, title: String) -> Unit,
+    onOpenForum: (target: ForumTarget, title: String) -> Unit,
+    onOpenMoodleWeb: (url: String, title: String) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val (state, refresh) = rememberLoadable { container.moodleRepository.courseContents(courseId) }
+    var externalToConfirm by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     fun openModule(module: CourseModule) {
+        when (module.modName) {
+            "assign" -> {
+                onOpenAssignment(module.id, module.instance ?: 0L, module.name)
+                return
+            }
+            "forum" -> {
+                onOpenForum(module.toForumTarget(courseId), module.name)
+                return
+            }
+        }
         scope.launch {
             val pdf = module.pdfContent
             if (pdf?.fileurl != null) {
@@ -78,12 +98,10 @@ fun CourseScreen(
             }
             val url = module.url ?: module.downloadableFiles.firstOrNull()?.fileurl
             if (url != null) {
-                // 自動ログインURL→失敗時は素のURL。どちらもログイン済みブラウザで提出等が可能
-                val target = container.moodleRepository.authedFileUrl(url)
-                    ?.takeIf { module.url == null } // ファイル直リンクのみトークン付与
-                    ?: container.moodleRepository.autologinUrl(url)
-                    ?: url
-                openInCustomTab(context, target)
+                when {
+                    UrlPolicy.isAllowedMoodleWebViewUrl(url) -> onOpenMoodleWeb(url, module.name)
+                    UrlPolicy.canOpenExternally(url) -> externalToConfirm = url to module.name
+                }
             }
         }
     }
@@ -153,6 +171,23 @@ fun CourseScreen(
             }
         }
     }
+
+    externalToConfirm?.let { (url, title) ->
+        AlertDialog(
+            onDismissRequest = { externalToConfirm = null },
+            title = { Text("外部サイトを開きます") },
+            text = { Text("$title\n$url") },
+            confirmButton = {
+                TextButton(onClick = {
+                    externalToConfirm = null
+                    openInCustomTab(context, url)
+                }) { Text("開く") }
+            },
+            dismissButton = {
+                TextButton(onClick = { externalToConfirm = null }) { Text("キャンセル") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -197,7 +232,7 @@ private fun SectionHeader(section: CourseSection) {
 @Composable
 private fun LabelText(module: CourseModule) {
     Text(
-        text = Jsoup.parse(module.description ?: "").text(),
+        text = htmlToPlainText(module.description),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
@@ -247,11 +282,11 @@ fun ModuleRow(module: CourseModule, onClick: () -> Unit) {
 private fun moduleIcon(module: CourseModule): ImageVector = when (module.modName) {
     "assign" -> Icons.AutoMirrored.Filled.Assignment
     "quiz" -> Icons.Filled.Quiz
-    "resource" -> if (module.pdfContent != null) Icons.Filled.PictureAsPdf else Icons.Filled.Article
+    "resource" -> if (module.pdfContent != null) Icons.Filled.PictureAsPdf else Icons.AutoMirrored.Filled.Article
     "folder" -> Icons.Filled.Folder
     "url" -> Icons.Filled.Link
     "forum" -> Icons.Filled.Forum
-    "page" -> Icons.Filled.Article
+    "page" -> Icons.AutoMirrored.Filled.Article
     "lti", "url_video" -> Icons.Filled.Videocam
-    else -> Icons.Filled.Article
+    else -> Icons.AutoMirrored.Filled.Article
 }

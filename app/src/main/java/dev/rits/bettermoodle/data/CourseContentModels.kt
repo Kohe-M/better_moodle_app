@@ -19,6 +19,8 @@ data class CourseSection(
 @Serializable
 data class CourseModule(
     val id: Long = 0,
+    val instance: Long? = null,
+    @SerialName("contextid") val contextId: Long = 0,
     val name: String = "",
     val url: String? = null,
     @SerialName("modname") val modName: String = "",

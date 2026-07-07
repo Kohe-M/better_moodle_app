@@ -20,7 +20,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.PopupNotification
@@ -37,10 +36,12 @@ private enum class NotificationFilter(val label: String) {
 
 /** Moodleの通知一覧。課題関連とそれ以外をフィルタで分けられる。 */
 @Composable
-fun NotificationsScreen(container: AppContainer) {
+fun NotificationsScreen(
+    container: AppContainer,
+    onOpenUrl: (url: String, title: String) -> Unit = { _, _ -> },
+) {
     val (state, refresh) = rememberLoadable { container.moodleRepository.notifications() }
     var filter by remember { mutableStateOf(NotificationFilter.ALL) }
-    val context = LocalContext.current
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
@@ -72,7 +73,7 @@ fun NotificationsScreen(container: AppContainer) {
                     items(filtered, key = { it.id }) { n ->
                         NotificationCard(n) {
                             n.contexturl?.takeIf { it.isNotBlank() }
-                                ?.let { openInCustomTab(context, it) }
+                                ?.let { onOpenUrl(it, n.contexturlname ?: n.subject) }
                         }
                     }
                 }

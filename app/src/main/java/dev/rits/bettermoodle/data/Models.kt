@@ -167,3 +167,7 @@ data class WsError(
 )
 
 class MoodleWsException(val errorCode: String?, message: String) : Exception(message)
+
+class MoodleHttpException(val status: Int) : Exception("HTTP $status")
+
+class MoodleResponseParseException : Exception("Moodle response parse error")
