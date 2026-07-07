@@ -165,7 +165,6 @@ class MoodleRepository(
         fun forumDiscussionsParams(forumInstanceId: Long): Map<String, String> =
             mapOf(
                 "forumid" to forumInstanceId.toString(),
-                "sortorder" to "timemodified DESC",
             )
 
         fun forumPostsParams(discussionId: Long): Map<String, String> =

@@ -34,7 +34,7 @@ fun CourseModule.toForumTarget(courseId: Long): ForumTarget =
     )
 
 fun ForumDiscussion.discussionIdForPosts(): Long =
-    id
+    discussion.takeIf { it > 0L } ?: id
 
 fun classifyForumLoadError(error: Throwable): ForumLoadErrorKind {
     val code = (error as? MoodleWsException)?.errorCode?.lowercase()

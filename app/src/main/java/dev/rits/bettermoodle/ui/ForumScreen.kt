@@ -264,6 +264,13 @@ private fun ForumErrorActions(
                 Text("Moodle画面で開く")
             }
         }
+        diagnostic?.safeMoodleErrorCode()?.let { code ->
+            Text(
+                "Moodle errorcode: $code",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (BuildConfig.DEBUG && diagnostic != null) {
             Card(Modifier.fillMaxWidth()) {
                 Text(
@@ -275,6 +282,11 @@ private fun ForumErrorActions(
         }
     }
 }
+
+private fun ForumDiagnostic.safeMoodleErrorCode(): String? =
+    moodleErrorCode?.takeIf { SAFE_MOODLE_ERROR_CODE.matches(it) }
+
+private val SAFE_MOODLE_ERROR_CODE = Regex("[A-Za-z0-9_-]{1,64}")
 
 private fun ForumDiagnostic.toSafeText(): String = buildString {
     appendLine("診断情報")

@@ -31,6 +31,7 @@ class ForumRoutingTest {
 
         val params = MoodleRepository.forumDiscussionsParams(target.forumInstanceId)
         assertEquals("202", params["forumid"])
+        assertFalse(params.containsKey("sortorder"))
         assertFalse(params.values.contains("101"))
     }
 
@@ -39,16 +40,24 @@ class ForumRoutingTest {
         val params = MoodleRepository.forumDiscussionsParams(202)
 
         assertEquals("202", params["forumid"])
-        assertEquals("timemodified DESC", params["sortorder"])
+        assertFalse(params.containsKey("sortorder"))
     }
 
     @Test
-    fun `discussion posts use discussion id from list response only`() {
+    fun `discussion posts prefer discussion id from list response`() {
         val discussion = ForumDiscussion(id = 303, discussion = 404)
+
+        assertEquals(404L, discussion.discussionIdForPosts())
+        assertEquals("404", MoodleRepository.forumPostsParams(discussion.discussionIdForPosts())["discussionid"])
+        assertFalse(MoodleRepository.forumPostsParams(discussion.discussionIdForPosts()).values.contains("303"))
+    }
+
+    @Test
+    fun `discussion posts fall back to first post id when discussion id is zero`() {
+        val discussion = ForumDiscussion(id = 303, discussion = 0)
 
         assertEquals(303L, discussion.discussionIdForPosts())
         assertEquals("303", MoodleRepository.forumPostsParams(discussion.discussionIdForPosts())["discussionid"])
-        assertFalse(MoodleRepository.forumPostsParams(discussion.discussionIdForPosts()).values.contains("404"))
     }
 
     @Test
