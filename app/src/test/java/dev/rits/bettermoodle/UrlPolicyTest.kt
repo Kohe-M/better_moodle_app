@@ -93,5 +93,6 @@ class UrlPolicyTest {
         assertTrue(UrlPolicy.isAllowedSsoWebViewUrl("https://login.microsoftonline.com/common/oauth2/v2.0/authorize"))
         assertFalse(UrlPolicy.isAllowedSsoWebViewUrl("https://example.com/phishing"))
         assertFalse(UrlPolicy.isAllowedSsoWebViewUrl("http://lms.ritsumei.ac.jp/admin/tool/mobile/launch.php"))
+        assertFalse(UrlPolicy.isAllowedSsoWebViewUrl("moodlemobile://token=abcdef"))
     }
 }

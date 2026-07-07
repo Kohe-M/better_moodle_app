@@ -243,6 +243,7 @@ private fun Root(container: AppContainer) {
         composable("moodleWeb?url={url}&title={title}") { entry ->
             MoodleWebScreen(
                 url = entry.arguments?.getString("url").orEmpty(),
+                title = entry.arguments?.getString("title") ?: "Moodle",
                 onBack = { rootNav.popBackStack() },
             )
         }
