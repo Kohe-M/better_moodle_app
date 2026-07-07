@@ -71,8 +71,8 @@ private fun TimetableGrid(
             .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         // 曜日ヘッダ
-        Row(modifier = Modifier.fillMaxWidth().height(30.dp)) {
-            Box(Modifier.width(30.dp))
+        Row(modifier = Modifier.fillMaxWidth().height(34.dp)) {
+            Box(Modifier.width(36.dp))
             timetable.dayLabels.forEachIndexed { i, label ->
                 HeaderCell(label, Modifier.weight(1f), highlight = i == todayIndex)
             }
@@ -80,7 +80,7 @@ private fun TimetableGrid(
         // 本体: 残り高さを時限数で均等割 → スクロール不要
         for (period in 1..maxPeriod) {
             Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                PeriodCell(period, Modifier.width(30.dp))
+                PeriodCell(period, Modifier.width(36.dp))
                 timetable.dayLabels.forEachIndexed { dayIdx, _ ->
                     val entries = byCell[dayIdx to period].orEmpty()
                     SubjectCell(
@@ -113,7 +113,7 @@ private fun HeaderCell(text: String, modifier: Modifier, highlight: Boolean) {
     ) {
         Text(
             text,
-            fontSize = 13.sp,
+            fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
             color = if (highlight) MaterialTheme.colorScheme.onPrimary
             else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -133,13 +133,13 @@ private fun PeriodCell(period: Int, modifier: Modifier) {
     ) {
         Text(
             "$period",
-            fontSize = 14.sp,
+            fontSize = 17.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,
         )
         if (times != null) {
-            Text(times.first, fontSize = 7.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(times.second, fontSize = 7.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(times.first, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(times.second, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -174,8 +174,8 @@ private fun SubjectCell(
             ) {
                 Text(
                     entries.joinToString("\n") { it.title },
-                    fontSize = 10.sp,
-                    lineHeight = 12.sp,
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
                     color = if (highlight) MaterialTheme.colorScheme.onPrimaryContainer
@@ -187,8 +187,8 @@ private fun SubjectCell(
                 if (!room.isNullOrBlank()) {
                     Text(
                         room,
-                        fontSize = 8.sp,
-                        lineHeight = 10.sp,
+                        fontSize = 10.sp,
+                        lineHeight = 12.sp,
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,

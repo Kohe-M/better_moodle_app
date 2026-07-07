@@ -151,16 +151,6 @@ fun CourseScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                if (courseCode != null) {
-                    item {
-                        SyllabusBanner {
-                            scope.launch {
-                                val syllabus = container.syllabusRepository.resolveUrl(courseCode)
-                                if (syllabus != null) openInCustomTab(context, syllabus)
-                            }
-                        }
-                    }
-                }
                 s.data.filter { it.uservisible && it.modules.isNotEmpty() }.forEach { section ->
                     item(key = "sec-${section.id}") { SectionHeader(section) }
                     section.modules
@@ -194,34 +184,6 @@ fun CourseScreen(
                 TextButton(onClick = { externalToConfirm = null }) { Text("キャンセル") }
             },
         )
-    }
-}
-
-@Composable
-private fun SyllabusBanner(onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.tertiaryContainer,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.AutoMirrored.Filled.MenuBook,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onTertiaryContainer,
-            )
-            Spacer(Modifier.width(12.dp))
-            Text(
-                "この科目のシラバスを開く",
-                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-            )
-        }
     }
 }
 
