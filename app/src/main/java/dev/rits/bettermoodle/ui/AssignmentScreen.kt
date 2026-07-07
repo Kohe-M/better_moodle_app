@@ -317,14 +317,6 @@ private fun AssignmentSummaryCard(assignment: Assignment, ui: AssignmentUiModel)
 }
 
 @Composable
-private fun SummaryLine(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, color = MaterialTheme.colorScheme.onSurface)
-    }
-}
-
-@Composable
 private fun AssignmentActions(
     ui: AssignmentUiModel,
     busy: Boolean,

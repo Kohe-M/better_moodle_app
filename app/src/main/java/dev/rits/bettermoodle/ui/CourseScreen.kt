@@ -51,8 +51,10 @@ import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.CourseModule
 import dev.rits.bettermoodle.data.CourseSection
 import dev.rits.bettermoodle.data.ForumTarget
+import dev.rits.bettermoodle.data.QuizTarget
 import dev.rits.bettermoodle.data.UrlPolicy
 import dev.rits.bettermoodle.data.toForumTarget
+import dev.rits.bettermoodle.data.toQuizTarget
 import kotlinx.coroutines.launch
 
 /**
@@ -72,6 +74,7 @@ fun CourseScreen(
     onOpenPdf: (fileUrl: String, title: String) -> Unit,
     onOpenAssignment: (moduleId: Long, assignId: Long, title: String) -> Unit,
     onOpenForum: (target: ForumTarget, title: String) -> Unit,
+    onOpenQuiz: (target: QuizTarget, title: String) -> Unit,
     onOpenMoodleWeb: (url: String, title: String) -> Unit,
 ) {
     val context = LocalContext.current
@@ -87,6 +90,10 @@ fun CourseScreen(
             }
             "forum" -> {
                 onOpenForum(module.toForumTarget(courseId), module.name)
+                return
+            }
+            "quiz" -> {
+                onOpenQuiz(module.toQuizTarget(courseId), module.name)
                 return
             }
         }

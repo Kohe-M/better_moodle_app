@@ -46,6 +46,7 @@ import androidx.navigation.compose.rememberNavController
 import dev.rits.bettermoodle.auth.SsoLogin
 import dev.rits.bettermoodle.data.ForumTarget
 import dev.rits.bettermoodle.data.PreviewKind
+import dev.rits.bettermoodle.data.QuizTarget
 import dev.rits.bettermoodle.data.UrlPolicy
 import dev.rits.bettermoodle.ui.AssignmentScreen
 import dev.rits.bettermoodle.ui.CourseScreen
@@ -57,6 +58,7 @@ import dev.rits.bettermoodle.ui.MoodleWebScreen
 import dev.rits.bettermoodle.ui.NotificationsScreen
 import dev.rits.bettermoodle.ui.PdfPreviewScreen
 import dev.rits.bettermoodle.ui.PortalScreen
+import dev.rits.bettermoodle.ui.QuizScreen
 import dev.rits.bettermoodle.ui.SyllabusScreen
 import dev.rits.bettermoodle.ui.TimetableScreen
 import dev.rits.bettermoodle.ui.openInCustomTab
@@ -125,6 +127,11 @@ private fun Root(container: AppContainer) {
                 onOpenForum = { target, title ->
                     rootNav.navigate(
                         forumRoute(target, title),
+                    )
+                },
+                onOpenQuiz = { target, title ->
+                    rootNav.navigate(
+                        quizRoute(target, title),
                     )
                 },
                 onOpenMoodleWeb = { url, title ->
@@ -210,6 +217,29 @@ private fun Root(container: AppContainer) {
             )
         }
 
+        composable("quiz?courseId={courseId}&courseModuleId={courseModuleId}&quizInstanceId={quizInstanceId}&contextId={contextId}&modName={modName}&title={title}&url={url}") { entry ->
+            val target = QuizTarget(
+                courseId = entry.arguments?.getString("courseId")?.toLongOrNull() ?: 0L,
+                courseModuleId = entry.arguments?.getString("courseModuleId")?.toLongOrNull() ?: 0L,
+                quizInstanceId = entry.arguments?.getString("quizInstanceId")?.toLongOrNull() ?: 0L,
+                contextId = entry.arguments?.getString("contextId")?.toLongOrNull()?.takeIf { it > 0L },
+                modName = entry.arguments?.getString("modName").orEmpty(),
+                url = entry.arguments?.getString("url")?.takeIf { it.isNotBlank() },
+            )
+            QuizScreen(
+                container = container,
+                target = target,
+                title = entry.arguments?.getString("title") ?: "Quiz",
+                onBack = { rootNav.popBackStack() },
+                onFallbackWeb = {
+                    val url = target.url
+                    if (!url.isNullOrBlank()) {
+                        rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("Quiz")}")
+                    }
+                },
+            )
+        }
+
         composable("moodleWeb?url={url}&title={title}") { entry ->
             MoodleWebScreen(
                 url = entry.arguments?.getString("url").orEmpty(),
@@ -236,6 +266,15 @@ private fun forumRoute(target: ForumTarget, title: String): String =
     "forum?courseId=${target.courseId}" +
         "&courseModuleId=${target.courseModuleId}" +
         "&forumInstanceId=${target.forumInstanceId}" +
+        "&contextId=${target.contextId ?: 0L}" +
+        "&modName=${Uri.encode(target.modName)}" +
+        "&title=${Uri.encode(title)}" +
+        "&url=${Uri.encode(target.url.orEmpty())}"
+
+private fun quizRoute(target: QuizTarget, title: String): String =
+    "quiz?courseId=${target.courseId}" +
+        "&courseModuleId=${target.courseModuleId}" +
+        "&quizInstanceId=${target.quizInstanceId}" +
         "&contextId=${target.contextId ?: 0L}" +
         "&modName=${Uri.encode(target.modName)}" +
         "&title=${Uri.encode(title)}" +

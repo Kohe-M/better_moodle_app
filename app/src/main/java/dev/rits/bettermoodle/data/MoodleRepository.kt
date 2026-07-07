@@ -63,6 +63,42 @@ class MoodleRepository(
     suspend fun assignmentStatus(assignId: Long): SubmissionStatusResponse =
         client.callAs("mod_assign_get_submission_status", mapOf("assignid" to assignId.toString()))
 
+    suspend fun quizzes(courseId: Long): List<Quiz> {
+        val resp: QuizzesResponse = client.callAs(
+            "mod_quiz_get_quizzes_by_courses",
+            quizzesByCoursesParams(courseId),
+        )
+        return resp.quizzes
+    }
+
+    suspend fun quiz(courseId: Long, courseModuleId: Long): Quiz? =
+        quizzes(courseId).firstOrNull { it.coursemodule == courseModuleId }
+
+    suspend fun quizAttempts(quizId: Long): List<QuizAttempt> {
+        require(quizId > 0L) { "Invalid quiz instance ID" }
+        val resp: QuizAttemptsResponse = client.callAs(
+            "mod_quiz_get_user_attempts",
+            quizUserAttemptsParams(quizId),
+        )
+        return resp.attempts
+    }
+
+    suspend fun quizBestGrade(quizId: Long): QuizBestGradeResponse {
+        require(quizId > 0L) { "Invalid quiz instance ID" }
+        return client.callAs(
+            "mod_quiz_get_user_best_grade",
+            quizBestGradeParams(quizId),
+        )
+    }
+
+    suspend fun quizAccessInformation(quizId: Long): QuizAccessInformationResponse {
+        require(quizId > 0L) { "Invalid quiz instance ID" }
+        return client.callAs(
+            "mod_quiz_get_quiz_access_information",
+            quizAccessInformationParams(quizId),
+        )
+    }
+
     suspend fun startAssignmentSubmission(assignId: Long) {
         client.call("mod_assign_start_submission", mapOf("assignid" to assignId.toString()))
     }
@@ -169,6 +205,22 @@ class MoodleRepository(
 
         fun forumPostsParams(discussionId: Long): Map<String, String> =
             mapOf("discussionid" to discussionId.toString())
+
+        fun quizzesByCoursesParams(courseId: Long): Map<String, String> =
+            mapOf("courseids[0]" to courseId.toString())
+
+        fun quizUserAttemptsParams(quizId: Long): Map<String, String> =
+            mapOf(
+                "quizid" to quizId.toString(),
+                "status" to "all",
+            )
+
+        fun quizBestGradeParams(quizId: Long): Map<String, String> =
+            mapOf("quizid" to quizId.toString())
+
+        fun quizAccessInformationParams(quizId: Long): Map<String, String> =
+            mapOf("quizid" to quizId.toString())
+
         private val DAY_CHARS = listOf("月", "火", "水", "木", "金", "土", "日")
 
         /**
