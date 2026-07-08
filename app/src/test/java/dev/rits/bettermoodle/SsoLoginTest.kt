@@ -68,6 +68,16 @@ class SsoLoginTest {
     }
 
     @Test
+    fun `location header probe extracts tokens only from scheme redirects`() {
+        val payload = encode("$signature:::aabbccddeeff00112233:::priv")
+        val tokens = SsoLogin.tokensFromLocationHeader("bettermoodle://token=$payload", passport)!!
+        assertEquals("aabbccddeeff00112233", tokens.wsToken)
+        assertNull(SsoLogin.tokensFromLocationHeader(null, passport))
+        assertNull(SsoLogin.tokensFromLocationHeader("https://lms.ritsumei.ac.jp/login/index.php", passport))
+        assertNull(SsoLogin.tokensFromLocationHeader("moodlemobile://token=$payload", passport))
+    }
+
+    @Test
     fun `passport has at least 128 bits of entropy material`() {
         val first = SsoLogin.newPassport()
         val second = SsoLogin.newPassport()

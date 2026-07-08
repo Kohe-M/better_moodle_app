@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,7 +32,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.rits.bettermoodle.BuildConfig
 import dev.rits.bettermoodle.auth.SsoLogin
+import dev.rits.bettermoodle.data.MoodleClient
 import dev.rits.bettermoodle.data.UrlPolicy
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * ログイン画面。
@@ -45,7 +50,25 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
     var showManual by remember { mutableStateOf(false) }
     var manualToken by remember { mutableStateOf("") }
     var loginError by remember { mutableStateOf<String?>(null) }
+    var probing by remember { mutableStateOf(false) }
+    var tokenDelivered by remember { mutableStateOf(false) }
     val passport = remember { SsoLogin.newPassport() }
+    val scope = rememberCoroutineScope()
+
+    fun deliverTokens(tokens: SsoLogin.Tokens) {
+        if (tokenDelivered) return
+        tokenDelivered = true
+        onToken(tokens)
+    }
+
+    // WebViewを経由せずlaunch.phpのLocationヘッダからトークンを直接取得する。
+    // セッションCookieが無ければnull (通常のWebView SSOへ)。
+    suspend fun probeLaunchToken(): SsoLogin.Tokens? = withContext(Dispatchers.IO) {
+        val cookies = runCatching {
+            CookieManager.getInstance().getCookie(MoodleClient.SITE_URL)
+        }.getOrNull()
+        SsoLogin.fetchTokenByProbe(SsoLogin.newPassport(), cookies)
+    }
 
     if (showWebView) {
         val error = loginError
@@ -82,8 +105,6 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                     settings.safeBrowsingEnabled = true
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
                     webViewClient = object : WebViewClient() {
-                        private var tokenHandled = false
-
                         /**
                          * トークンURL (bettermoodle://token=...) ならここで回収してtrueを返す。
                          * KMSI (「ログイン状態を維持しますか?」) はフォームPOSTで送信され、
@@ -93,11 +114,10 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                         private fun handleTokenUrl(url: String?): Boolean {
                             val target = url ?: return false
                             if (!SsoLogin.isTokenSchemeUrl(target)) return false
-                            if (tokenHandled) return true
+                            if (tokenDelivered) return true
                             val tokens = SsoLogin.parseTokenUrl(target, passport)
                             if (tokens != null) {
-                                tokenHandled = true
-                                onToken(tokens)
+                                deliverTokens(tokens)
                             } else {
                                 loginError = "ログイン情報を受け取れませんでした。もう一度お試しください。"
                             }
@@ -122,6 +142,21 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                             if (handleTokenUrl(url)) view?.stopLoading()
                         }
 
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            val current = url ?: return
+                            if (tokenDelivered || probing) return
+                            // カスタムスキームへの302はWebViewがコールバックなしに破棄する
+                            // ことがあるため、lmsホストのページに戻ってきたタイミングで
+                            // launch.php を直接叩いてトークンを回収する。
+                            if (!UrlPolicy.isAllowedMoodleUrl(current)) return
+                            probing = true
+                            scope.launch {
+                                val tokens = probeLaunchToken()
+                                probing = false
+                                if (tokens != null) deliverTokens(tokens)
+                            }
+                        }
+
                         override fun onReceivedError(
                             view: WebView?,
                             request: WebResourceRequest?,
@@ -130,7 +165,7 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                             if (request?.isForMainFrame != true) return
                             val url = request.url?.toString()
                             if (handleTokenUrl(url)) return
-                            if (!tokenHandled) {
+                            if (!tokenDelivered) {
                                 loginError = "ログインページを読み込めませんでした。通信環境を確認して、もう一度お試しください。"
                             }
                         }
@@ -157,8 +192,21 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(32.dp))
-        Button(onClick = { showWebView = true }, modifier = Modifier.fillMaxWidth()) {
-            Text("立命館アカウントでログイン")
+        Button(
+            onClick = {
+                if (probing) return@Button
+                probing = true
+                scope.launch {
+                    // 前回のSSOセッションが残っていればWebViewを開かずにログイン完了できる
+                    val tokens = probeLaunchToken()
+                    probing = false
+                    if (tokens != null) deliverTokens(tokens) else showWebView = true
+                }
+            },
+            enabled = !probing,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (probing) "確認中..." else "立命館アカウントでログイン")
         }
         if (BuildConfig.DEBUG) {
             Spacer(Modifier.height(16.dp))

@@ -36,6 +36,38 @@ object SsoLogin {
     fun isTokenSchemeUrl(url: String): Boolean =
         url.trim().startsWith("${MoodleClient.URL_SCHEME}://", ignoreCase = true)
 
+    private val probeHttp by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+    }
+
+    /**
+     * launch.php をHTTPで直接叩き、302の Location ヘッダからトークンを取り出す。
+     *
+     * WebViewはカスタムスキームへのサーバーリダイレクトを (POST後や初回ロードの302で)
+     * どのコールバックにも通知せず黙って破棄することがあるため、WebViewに依存しない
+     * 受け取り経路として使う。セッションCookieが無い/期限切れの場合は Location が
+     * ログインページになるので null を返す (呼び出し側でWebViewのSSOにフォールバック)。
+     */
+    fun fetchTokenByProbe(passport: String, cookieHeader: String?): Tokens? = runCatching {
+        val request = okhttp3.Request.Builder()
+            .url(launchUrl(passport))
+            .apply { if (!cookieHeader.isNullOrBlank()) header("Cookie", cookieHeader) }
+            .build()
+        probeHttp.newCall(request).execute().use { resp ->
+            tokensFromLocationHeader(resp.header("Location"), passport)
+        }
+    }.getOrNull()
+
+    /** リダイレクト先ヘッダがトークンスキームURLならトークンを取り出す */
+    fun tokensFromLocationHeader(location: String?, passport: String): Tokens? {
+        val loc = location?.trim() ?: return null
+        if (!isTokenSchemeUrl(loc)) return null
+        return parseTokenUrl(loc, passport)
+    }
+
     /**
      * "bettermoodle://token=..." 形式のURLからトークンを取り出す。
      * 対象外のURL (通常のhttpページ等) はnull。
