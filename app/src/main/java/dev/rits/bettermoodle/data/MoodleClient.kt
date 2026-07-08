@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit
 class MoodleClient(
     private val siteUrl: String = SITE_URL,
     private val tokenProvider: () -> String?,
+    private val privateTokenProvider: suspend () -> String? = { null },
     /** invalidtoken等の認証エラー検出時に呼ばれる (ログアウト→ログイン画面遷移に使う) */
     private val onAuthError: () -> Unit = {},
 ) {
@@ -38,6 +39,8 @@ class MoodleClient(
         val token = tokenProvider() ?: return null
         return UrlPolicy.appendMoodleToken(fileUrl, token)
     }
+
+    suspend fun privateToken(): String? = privateTokenProvider()
 
     val json = Json {
         ignoreUnknownKeys = true

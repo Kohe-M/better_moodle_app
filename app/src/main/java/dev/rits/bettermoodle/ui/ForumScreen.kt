@@ -108,7 +108,7 @@ fun ForumScreen(
                 },
                 actions = {
                     IconButton(onClick = {
-                        if (selected == null) refreshDiscussions()
+                        refreshDiscussions()
                     }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "再読み込み")
                     }
@@ -163,7 +163,9 @@ fun ForumScreen(
                 container = container,
                 discussion = selected!!,
                 target = target,
+                refreshTick = refreshTick,
                 onOpenUrl = onOpenUrl,
+                onFallbackWeb = onFallbackWeb,
                 modifier = Modifier.padding(padding),
             )
         }
@@ -198,7 +200,9 @@ private fun DiscussionPosts(
     container: AppContainer,
     discussion: ForumDiscussion,
     target: ForumTarget,
+    refreshTick: Int,
     onOpenUrl: (String, String) -> Unit,
+    onFallbackWeb: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val discussionId = discussion.discussionIdForPosts()
@@ -220,11 +224,19 @@ private fun DiscussionPosts(
             throw IllegalStateException(forumLoadErrorMessage(kind))
         }
     }
+    var observedRefreshTick by remember(discussionId) { mutableIntStateOf(refreshTick) }
+    LaunchedEffect(discussionId, refreshTick) {
+        if (refreshTick != observedRefreshTick) {
+            observedRefreshTick = refreshTick
+            refresh()
+        }
+    }
+
     when (val s = state) {
         is UiState.Loading -> LoadingBox()
         is UiState.Error -> {
             ErrorBox(s.message, onRetry = refresh)
-            ForumErrorActions(diagnostic = diagnostic, onFallbackWeb = {})
+            ForumErrorActions(diagnostic = diagnostic, onFallbackWeb = onFallbackWeb)
         }
         is UiState.Success -> LazyColumn(
             modifier.fillMaxSize(),

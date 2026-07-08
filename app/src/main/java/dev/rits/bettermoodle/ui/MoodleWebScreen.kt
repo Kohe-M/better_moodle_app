@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.BuildConfig
 import dev.rits.bettermoodle.data.UrlPolicy
 import java.net.URI
@@ -43,14 +45,26 @@ import java.net.URI
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun MoodleWebScreen(
+    container: AppContainer,
     url: String,
     title: String,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     var webView by remember { mutableStateOf<WebView?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var blockedNotice by remember { mutableStateOf<BlockedNotice?>(null) }
+    var loading by remember(url) { mutableStateOf(true) }
+    var blockedNotice by remember(url) { mutableStateOf<BlockedNotice?>(null) }
+    var initialUrl by remember(url) { mutableStateOf<String?>(null) }
+    val canLoadOriginalUrl = UrlPolicy.isAllowedMoodleWebViewUrl(url)
+
+    LaunchedEffect(url, canLoadOriginalUrl) {
+        webView = null
+        initialUrl = null
+        loading = true
+        if (canLoadOriginalUrl) {
+            initialUrl = container.moodleRepository.autologinUrl(url) ?: url
+        }
+    }
 
     BackHandler {
         val view = webView
@@ -69,7 +83,7 @@ fun MoodleWebScreen(
             )
         },
     ) { padding ->
-        if (!UrlPolicy.isAllowedMoodleWebViewUrl(url)) {
+        if (!canLoadOriginalUrl) {
             Box(Modifier.padding(padding)) {
                 ErrorBox("このMoodle URLは安全に開けません", onRetry = null)
             }
@@ -85,45 +99,48 @@ fun MoodleWebScreen(
                 )
             }
             Box(Modifier.fillMaxSize()) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { context ->
-                        WebView(context).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            settings.allowFileAccess = false
-                            settings.allowContentAccess = false
-                            settings.safeBrowsingEnabled = true
-                            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
-                            webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(
-                                    view: WebView?,
-                                    request: WebResourceRequest?,
-                                ): Boolean {
-                                    val target = request?.url?.toString() ?: return true
-                                    if (BuildConfig.DEBUG) {
-                                        Log.d("MoodleWeb", "navigate: ${debugUrlLabel(target)}")
+                initialUrl?.let { urlToLoad ->
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { context ->
+                            WebView(context).apply {
+                                settings.javaScriptEnabled = true
+                                settings.domStorageEnabled = true
+                                settings.allowFileAccess = false
+                                settings.allowContentAccess = false
+                                settings.safeBrowsingEnabled = true
+                                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                                CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+                                webViewClient = object : WebViewClient() {
+                                    override fun shouldOverrideUrlLoading(
+                                        view: WebView?,
+                                        request: WebResourceRequest?,
+                                    ): Boolean {
+                                        if (request?.isForMainFrame != true) return false
+                                        val target = request?.url?.toString() ?: return true
+                                        if (BuildConfig.DEBUG) {
+                                            Log.d("MoodleWeb", "navigate: ${debugUrlLabel(target)}")
+                                        }
+                                        // ログインリダイレクト (Moodle→SSO) を通すため、SSO許可リストで判定する。
+                                        if (UrlPolicy.isAllowedSsoWebViewUrl(target)) return false
+                                        blockedNotice = BlockedNotice.BlockedUrl(target)
+                                        return true
                                     }
-                                    // ログインリダイレクト (Moodle→SSO) を通すため、SSO許可リストで判定する。
-                                    if (UrlPolicy.isAllowedSsoWebViewUrl(target)) return false
-                                    blockedNotice = BlockedNotice.BlockedUrl(target)
-                                    return true
-                                }
 
-                                override fun onPageFinished(view: WebView?, url: String?) {
-                                    loading = false
-                                    CookieManager.getInstance().flush()
+                                    override fun onPageFinished(view: WebView?, url: String?) {
+                                        loading = false
+                                        CookieManager.getInstance().flush()
+                                    }
                                 }
+                                setDownloadListener { _, _, _, _, _ ->
+                                    blockedNotice = BlockedNotice.Message("このファイルはダウンロードできません")
+                                }
+                                loadUrl(urlToLoad)
+                                webView = this
                             }
-                            setDownloadListener { _, _, _, _, _ ->
-                                blockedNotice = BlockedNotice.Message("このファイルはダウンロードできません")
-                            }
-                            loadUrl(url)
-                            webView = this
-                        }
-                    },
-                )
+                        },
+                    )
+                }
                 if (loading) LinearProgressIndicator(Modifier.align(Alignment.TopCenter))
             }
         }

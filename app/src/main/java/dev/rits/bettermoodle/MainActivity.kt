@@ -311,6 +311,7 @@ private fun Root(container: AppContainer) {
 
         composable("moodleWeb?url={url}&title={title}") { entry ->
             MoodleWebScreen(
+                container = container,
                 url = entry.arguments?.getString("url").orEmpty(),
                 title = entry.arguments?.getString("title") ?: "Moodle",
                 onBack = { rootNav.popBackStack() },
@@ -458,8 +459,8 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
             composable("notifications") { NotificationsScreen(container, onOpenUrl = ::openUrl) }
             composable("syllabus") { SyllabusScreen(container) }
             composable("portal") {
-                PortalScreen(onClearSession = {
-                    container.clearPortalSession()
+                PortalScreen(onClearAllWebSessions = {
+                    container.clearAllWebSessions()
                 })
             }
         }

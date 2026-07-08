@@ -33,6 +33,7 @@ class SessionStore(private val context: Context) {
         val TOKEN = stringPreferencesKey("ws_token")
         val PRIVATE_TOKEN = stringPreferencesKey("private_token")
         val ENCRYPTED_TOKEN = stringPreferencesKey("encrypted_ws_token_v1")
+        val ENCRYPTED_PRIVATE_TOKEN = stringPreferencesKey("encrypted_private_token_v1")
         val FULL_NAME = stringPreferencesKey("full_name")
         val SYLLABUS_CACHE = stringPreferencesKey("syllabus_url_cache") // JSON {code: url}
         val NOTIFIED_EVENT_IDS = stringSetPreferencesKey("notified_event_ids")
@@ -54,10 +55,23 @@ class SessionStore(private val context: Context) {
         return decryptToken(context.dataStore.data.first()[Keys.ENCRYPTED_TOKEN])
     }
 
+    suspend fun privateToken(): String? {
+        migrateLegacyAuthIfNeeded()
+        return decryptToken(context.dataStore.data.first()[Keys.ENCRYPTED_PRIVATE_TOKEN])
+    }
+
     suspend fun saveLogin(token: String, privateToken: String?) {
         val encrypted = encryptToken(token)
+        val encryptedPrivateToken = privateToken
+            ?.takeIf { it.isNotBlank() }
+            ?.let(::encryptToken)
         context.dataStore.edit { prefs ->
             prefs[Keys.ENCRYPTED_TOKEN] = encrypted
+            if (encryptedPrivateToken != null) {
+                prefs[Keys.ENCRYPTED_PRIVATE_TOKEN] = encryptedPrivateToken
+            } else {
+                prefs.remove(Keys.ENCRYPTED_PRIVATE_TOKEN)
+            }
             prefs.remove(Keys.TOKEN)
             prefs.remove(Keys.PRIVATE_TOKEN)
         }
@@ -74,6 +88,7 @@ class SessionStore(private val context: Context) {
     suspend fun clearAuthTokens() {
         context.dataStore.edit { prefs ->
             prefs.remove(Keys.ENCRYPTED_TOKEN)
+            prefs.remove(Keys.ENCRYPTED_PRIVATE_TOKEN)
             prefs.remove(Keys.TOKEN)
             prefs.remove(Keys.PRIVATE_TOKEN)
         }

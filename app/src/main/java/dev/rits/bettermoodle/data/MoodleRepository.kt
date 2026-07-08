@@ -185,7 +185,11 @@ class MoodleRepository(
      */
     suspend fun autologinUrl(targetUrl: String): String? = runCatching {
         if (!UrlPolicy.canUseMoodleAutologin(targetUrl)) return null
-        val key: AutologinKey = client.callAs("tool_mobile_get_autologin_key")
+        val privateToken = client.privateToken() ?: return null
+        val key: AutologinKey = client.callAs(
+            "tool_mobile_get_autologin_key",
+            mapOf("privatetoken" to privateToken),
+        )
         if (key.autologinurl.isBlank() || key.key.isBlank()) return null
         if (!UrlPolicy.isAllowedMoodleUrl(key.autologinurl)) return null
         val encoded = java.net.URLEncoder.encode(targetUrl, "UTF-8")
@@ -239,6 +243,7 @@ class MoodleRepository(
             mapOf("courseids[0]" to courseId.toString())
 
         private val DAY_CHARS = listOf("月", "火", "水", "木", "金", "土", "日")
+        private val DAY_OF_WEEK_HEADER_REGEX = Regex("([月火水木金土日])曜")
 
         /**
          * rutime_tableブロックの table.timetable を解析する。
@@ -257,8 +262,13 @@ class MoodleRepository(
             val colToDay = mutableMapOf<Int, Int>()
             headerCells.forEachIndexed { col, cell ->
                 val text = cell.text()
-                DAY_CHARS.forEachIndexed { dayIdx, ch ->
-                    if (text.contains(ch)) colToDay[col] = dayIdx
+                val dayIdx = DAY_OF_WEEK_HEADER_REGEX.find(text)
+                    ?.groupValues
+                    ?.get(1)
+                    ?.let(DAY_CHARS::indexOf)
+                    ?: DAY_CHARS.indexOfFirst { text.contains(it) }
+                if (dayIdx >= 0) {
+                    colToDay[col] = dayIdx
                 }
             }
 

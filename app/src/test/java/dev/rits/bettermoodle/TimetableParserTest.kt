@@ -52,6 +52,32 @@ class TimetableParserTest {
     }
 
     @Test
+    fun `曜日形式のヘッダを正しい列として解析できる`() {
+        val htmlWithDayOfWeekHeaders = """
+            <table class="timetable">
+              <tr><th></th><th>月曜日</th><th>火曜日</th><th>水曜日</th><th>木曜日</th><th>金曜日</th></tr>
+              <tr>
+                <td class="time">1</td>
+                <td><div class="subject"><a href="https://lms.ritsumei.ac.jp/course/view.php?id=101">20001:月曜科目</a></div></td>
+                <td><div class="subject"><a href="https://lms.ritsumei.ac.jp/course/view.php?id=102">20002:火曜科目</a></div></td>
+                <td><div class="subject"><a href="https://lms.ritsumei.ac.jp/course/view.php?id=103">20003:水曜科目</a></div></td>
+                <td><div class="subject"><a href="https://lms.ritsumei.ac.jp/course/view.php?id=104">20004:木曜科目</a></div></td>
+                <td><div class="subject"><a href="https://lms.ritsumei.ac.jp/course/view.php?id=105">20005:金曜科目</a></div></td>
+              </tr>
+            </table>
+        """.trimIndent()
+
+        val timetable = MoodleRepository.parseTimetableHtml(htmlWithDayOfWeekHeaders)
+
+        assertEquals(5, timetable.entries.size)
+        (0..4).forEach { dayIndex ->
+            val entry = timetable.entries.first { it.courseCode == "2000${dayIndex + 1}" }
+            assertEquals(dayIndex, entry.dayIndex)
+            assertEquals(1, entry.period)
+        }
+    }
+
+    @Test
     fun `空HTMLは空の時間割を返す`() {
         val timetable = MoodleRepository.parseTimetableHtml("<div>no table</div>")
         assertTrue(timetable.entries.isEmpty())

@@ -66,6 +66,7 @@ class AppContainer(private val app: Application) {
     @Volatile private var currentToken: String? = null
     val moodleClient = MoodleClient(
         tokenProvider = { currentToken },
+        privateTokenProvider = { sessionStore.privateToken() },
         onAuthError = { appScope.launch { clearAuthTokens() } },
     )
     val moodleRepository = MoodleRepository(moodleClient)
@@ -86,7 +87,7 @@ class AppContainer(private val app: Application) {
     suspend fun logout() {
         sessionStore.logout()
         LoadableMemoryCache.clear()
-        clearWebViewSession()
+        clearAllWebSessions()
         currentToken = null
     }
 
@@ -94,18 +95,10 @@ class AppContainer(private val app: Application) {
         sessionStore.clearAuthTokens()
         LoadableMemoryCache.clear()
         currentToken = null
-        clearMoodleWebSession()
+        clearAllWebSessions()
     }
 
-    suspend fun clearPortalSession() {
-        clearPortalWebSession()
-    }
-
-    private suspend fun clearMoodleWebSession() = clearWebViewSession()
-
-    private suspend fun clearPortalWebSession() = clearWebViewSession()
-
-    private suspend fun clearWebViewSession() = withContext(Dispatchers.Main) {
+    suspend fun clearAllWebSessions() = withContext(Dispatchers.Main) {
         runCatching {
             CookieManager.getInstance().removeAllCookies(null)
             CookieManager.getInstance().flush()
