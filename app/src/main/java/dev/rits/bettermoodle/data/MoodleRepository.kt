@@ -157,10 +157,12 @@ class MoodleRepository(
             "mod_forum_get_discussion_posts",
             forumPostsParams(discussionId),
         )
-        client.call(
-            "mod_forum_view_forum_discussion",
-            forumPostsParams(discussionId),
-        )
+        runCatching {
+            client.call(
+                "mod_forum_view_forum_discussion",
+                forumPostsParams(discussionId),
+            )
+        }
         return resp.posts
     }
 

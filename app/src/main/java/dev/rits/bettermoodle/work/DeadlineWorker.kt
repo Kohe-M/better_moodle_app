@@ -36,12 +36,13 @@ class DeadlineWorker(
             app.container.moodleRepository.upcomingDeadlines(now)
         }.getOrElse { return Result.retry() }
 
+        val currentDeadlineIds = deadlines.map { it.id.toString() }.toSet()
         val soon = deadlines.filter { it.timesort in now..(now + 24 * 3600) }
         val notified = store.notifiedEventIds()
         val fresh = soon.filter { it.id.toString() !in notified }
-        if (fresh.isEmpty()) return Result.success()
+        val newlyNotified = mutableSetOf<String>()
 
-        if (ContextCompat.checkSelfPermission(
+        if (fresh.isNotEmpty() && ContextCompat.checkSelfPermission(
                 applicationContext, Manifest.permission.POST_NOTIFICATIONS,
             ) == PackageManager.PERMISSION_GRANTED
         ) {
@@ -62,9 +63,16 @@ class DeadlineWorker(
                     .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                     .build()
                 manager.notify(event.id.toInt(), notification)
+                newlyNotified += event.id.toString()
             }
         }
-        store.addNotifiedEventIds(fresh.map { it.id.toString() }.toSet())
+        store.replaceNotifiedEventIds(
+            retainedNotifiedEventIds(
+                existingNotifiedIds = notified,
+                currentDeadlineIds = currentDeadlineIds,
+                newlyNotifiedIds = newlyNotified,
+            ),
+        )
         return Result.success()
     }
 

@@ -72,7 +72,7 @@ fun buildAssignmentUiModel(
     val isDraft = submissionStatus == "draft"
     val canEdit = last?.canedit == true
     val canSubmit = last?.cansubmit == true
-    val graded = last?.graded == true || status.feedback?.grade?.grade?.isNotBlank() == true
+    val graded = last?.graded == true || isPassingGrade(status.feedback?.grade?.grade)
     val overdue = assignment.duedate > 0L && nowEpochSeconds > assignment.duedate
     val beforeOpen = assignment.allowsubmissionsfromdate > 0L && nowEpochSeconds < assignment.allowsubmissionsfromdate
     val dueSoon = assignment.duedate > 0L && assignment.duedate - nowEpochSeconds in 0 until 24 * 3600
@@ -132,6 +132,9 @@ fun extractOnlineText(status: SubmissionStatusResponse): String =
         ?.firstOrNull { it.text.isNotBlank() }
         ?.text
         .orEmpty()
+
+fun isPassingGrade(grade: String?): Boolean =
+    grade?.trim()?.toDoubleOrNull()?.let { it >= 0.0 } == true
 
 fun extractSubmittedFiles(status: SubmissionStatusResponse): List<SubmittedFileUi> =
     status.lastattempt?.submission?.plugins

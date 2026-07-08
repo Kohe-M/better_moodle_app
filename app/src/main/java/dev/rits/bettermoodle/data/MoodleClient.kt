@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import okhttp3.FormBody
@@ -65,10 +66,10 @@ class MoodleClient(
                 val element = runCatching { json.parseToJsonElement(text) }
                     .getOrElse { throw MoodleResponseParseException() }
                 // Moodleはエラーも HTTP 200 の {"exception": ...} で返す
-                if (element is kotlinx.serialization.json.JsonObject && "exception" in element.jsonObject) {
+                if (element is JsonObject && ("exception" in element.jsonObject || "errorcode" in element.jsonObject)) {
                     val err = json.decodeFromJsonElement(WsError.serializer(), element)
                     if (err.errorcode in AUTH_ERROR_CODES) onAuthError()
-                    throw MoodleWsException(err.errorcode, err.message ?: "Moodle WSエラー")
+                    throw MoodleWsException(err.errorcode, err.message ?: err.error ?: "Moodle WSエラー")
                 }
                 element
             }
@@ -101,10 +102,10 @@ class MoodleClient(
                 val text = resp.body?.string() ?: throw IOException("Empty response")
                 val element = runCatching { json.parseToJsonElement(text) }
                     .getOrElse { throw MoodleResponseParseException() }
-                if (element is kotlinx.serialization.json.JsonObject && "exception" in element.jsonObject) {
+                if (element is JsonObject && ("exception" in element.jsonObject || "errorcode" in element.jsonObject)) {
                     val err = json.decodeFromJsonElement(WsError.serializer(), element)
                     if (err.errorcode in AUTH_ERROR_CODES) onAuthError()
-                    throw MoodleWsException(err.errorcode, err.message ?: "Moodle WS error")
+                    throw MoodleWsException(err.errorcode, err.message ?: err.error ?: "Moodle WS error")
                 }
                 json.decodeFromJsonElement(element)
             }

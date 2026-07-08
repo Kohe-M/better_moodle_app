@@ -27,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,6 +73,7 @@ fun PdfPreviewScreen(
     val context = LocalContext.current
 
     var state by remember(fileUrl) { mutableStateOf<PdfState>(PdfState.Loading) }
+    val latestState by rememberUpdatedState(state)
     LaunchedEffect(fileUrl) {
         state = PdfState.Loading
         state = withContext(Dispatchers.IO) {
@@ -85,8 +87,17 @@ fun PdfPreviewScreen(
                     throw java.io.IOException("許可されていないPDF URLです")
                 }
                 val file = downloadToCache(context.cacheDir, authed)
-                inspectPdf(file)
+                runCatching { inspectPdf(file) }
+                    .getOrElse {
+                        file.delete()
+                        throw it
+                    }
             }.getOrElse { PdfState.Failed(it.message ?: "PDFを表示できませんでした") }
+        }
+    }
+    DisposableEffect(fileUrl) {
+        onDispose {
+            (latestState as? PdfState.Ready)?.file?.delete()
         }
     }
 
@@ -141,8 +152,10 @@ fun PdfPreviewScreen(
 private val downloadHttp = OkHttpClient()
 private const val MAX_PDF_BYTES = 30L * 1024L * 1024L
 private const val MAX_BITMAP_PIXELS = 4_000_000
+private const val PREVIEW_CACHE_MAX_AGE_MILLIS = 24L * 60L * 60L * 1000L
 
 private fun downloadToCache(cacheDir: File, url: String): File {
+    cleanupOldPreviewPdfs(cacheDir)
     val tmp = File.createTempFile("preview_", ".tmp", cacheDir)
     val out = File.createTempFile("preview_", ".pdf", cacheDir).also { it.delete() }
     return runCatching {
@@ -177,6 +190,17 @@ private fun downloadToCache(cacheDir: File, url: String): File {
         out.delete()
         throw error
     }
+}
+
+private fun cleanupOldPreviewPdfs(
+    cacheDir: File,
+    nowMillis: Long = System.currentTimeMillis(),
+) {
+    cacheDir.listFiles { file ->
+        file.isFile && file.name.startsWith("preview_") && file.name.endsWith(".pdf")
+    }.orEmpty()
+        .filter { nowMillis - it.lastModified() > PREVIEW_CACHE_MAX_AGE_MILLIS }
+        .forEach { runCatching { it.delete() } }
 }
 
 private fun looksLikePdf(file: File): Boolean {

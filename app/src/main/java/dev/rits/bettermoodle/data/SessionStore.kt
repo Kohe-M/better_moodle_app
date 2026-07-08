@@ -164,6 +164,16 @@ class SessionStore(private val context: Context) {
         }
     }
 
+    suspend fun replaceNotifiedEventIds(ids: Set<String>) {
+        context.dataStore.edit {
+            if (ids.isEmpty()) {
+                it.remove(Keys.NOTIFIED_EVENT_IDS)
+            } else {
+                it[Keys.NOTIFIED_EVENT_IDS] = ids
+            }
+        }
+    }
+
     companion object {
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val KEY_ALIAS = "better_moodle_ws_token_v1"

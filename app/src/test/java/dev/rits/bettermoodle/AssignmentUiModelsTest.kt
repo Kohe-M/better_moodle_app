@@ -3,6 +3,8 @@ package dev.rits.bettermoodle
 import dev.rits.bettermoodle.data.Assignment
 import dev.rits.bettermoodle.data.AssignmentAction
 import dev.rits.bettermoodle.data.AssignmentConfig
+import dev.rits.bettermoodle.data.AssignmentFeedback
+import dev.rits.bettermoodle.data.AssignmentGrade
 import dev.rits.bettermoodle.data.AssignmentGradingLabel
 import dev.rits.bettermoodle.data.AssignmentLastAttempt
 import dev.rits.bettermoodle.data.AssignmentSubmission
@@ -80,6 +82,37 @@ class AssignmentUiModelsTest {
         assertEquals(AssignmentSubmissionLabel.Draft, ui.submission)
         assertTrue(AssignmentAction.Edit in ui.actions)
         assertTrue(AssignmentAction.FinalSubmit in ui.actions)
+    }
+
+    @Test
+    fun `negative feedback grade is not treated as graded`() {
+        val ui = buildAssignmentUiModel(
+            assignment = Assignment(),
+            status = SubmissionStatusResponse(
+                feedback = AssignmentFeedback(
+                    grade = AssignmentGrade(grade = "-1.00000"),
+                ),
+            ),
+            nowEpochSeconds = 1_000,
+        )
+
+        assertEquals(AssignmentGradingLabel.NotMarked, ui.grading)
+    }
+
+    @Test
+    fun `non-negative feedback grade is treated as graded`() {
+        val ui = buildAssignmentUiModel(
+            assignment = Assignment(),
+            status = SubmissionStatusResponse(
+                feedback = AssignmentFeedback(
+                    grade = AssignmentGrade(grade = "85.00000"),
+                ),
+            ),
+            nowEpochSeconds = 1_000,
+        )
+
+        assertEquals(AssignmentGradingLabel.Graded, ui.grading)
+        assertEquals(AssignmentAvailabilityLabel.Graded, ui.availability)
     }
 
     @Test

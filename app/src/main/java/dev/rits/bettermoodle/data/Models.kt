@@ -162,6 +162,7 @@ data class Timetable(
 data class WsError(
     val exception: String? = null,
     val errorcode: String? = null,
+    val error: String? = null,
     val message: String? = null,
     @SerialName("debuginfo") val debugInfo: String? = null,
 )
