@@ -162,14 +162,58 @@ fun ForumScreen(
         } else {
             DiscussionPosts(
                 container = container,
-                discussion = selected!!,
-                target = target,
+                discussionId = selected!!.discussionIdForPosts(),
+                diagnosticTarget = target,
                 refreshTick = refreshTick,
                 onOpenUrl = onOpenUrl,
                 onFallbackWeb = onFallbackWeb,
                 modifier = Modifier.padding(padding),
             )
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ForumDiscussionScreen(
+    container: AppContainer,
+    discussionId: Long,
+    title: String,
+    fallbackUrl: String,
+    onBack: () -> Unit,
+    onOpenUrl: (String, String) -> Unit,
+    onFallbackWeb: (String, String) -> Unit,
+) {
+    var refreshTick by remember { mutableIntStateOf(0) }
+    val screenTitle = title.ifBlank { "フォーラム" }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(screenTitle, maxLines = 1) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { refreshTick++ }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "再読込")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        DiscussionPosts(
+            container = container,
+            discussionId = discussionId,
+            diagnosticTarget = null,
+            refreshTick = refreshTick,
+            onOpenUrl = onOpenUrl,
+            onFallbackWeb = { onFallbackWeb(fallbackUrl, screenTitle) },
+            alwaysAllowFallback = fallbackUrl.isNotBlank(),
+            modifier = Modifier.padding(padding),
+        )
     }
 }
 
@@ -199,14 +243,14 @@ private fun DiscussionCard(discussion: ForumDiscussion, onClick: () -> Unit) {
 @Composable
 private fun DiscussionPosts(
     container: AppContainer,
-    discussion: ForumDiscussion,
-    target: ForumTarget,
+    discussionId: Long,
+    diagnosticTarget: ForumTarget?,
     refreshTick: Int,
     onOpenUrl: (String, String) -> Unit,
     onFallbackWeb: () -> Unit,
     modifier: Modifier = Modifier,
+    alwaysAllowFallback: Boolean = false,
 ) {
-    val discussionId = discussion.discussionIdForPosts()
     var diagnostic by remember { mutableStateOf<ForumDiagnostic?>(null) }
     val (state, refresh) = rememberLoadable("forumPosts:$discussionId") {
         try {
@@ -221,7 +265,7 @@ private fun DiscussionPosts(
                 kind = kind,
                 moodleErrorCode = forumMoodleErrorCode(error),
                 httpStatus = forumHttpStatus(error),
-                target = target,
+                target = diagnosticTarget,
             )
             throw IllegalStateException(forumLoadErrorMessage(kind))
         }
@@ -238,7 +282,11 @@ private fun DiscussionPosts(
         is UiState.Loading -> LoadingBox()
         is UiState.Error -> {
             ErrorBox(s.message, onRetry = refresh)
-            ForumErrorActions(diagnostic = diagnostic, onFallbackWeb = onFallbackWeb)
+            ForumErrorActions(
+                diagnostic = diagnostic,
+                onFallbackWeb = onFallbackWeb,
+                alwaysAllowFallback = alwaysAllowFallback,
+            )
         }
         is UiState.Success -> LazyColumn(
             modifier.fillMaxSize(),
@@ -258,15 +306,16 @@ private data class ForumDiagnostic(
     val kind: ForumLoadErrorKind,
     val moodleErrorCode: String?,
     val httpStatus: Int?,
-    val target: ForumTarget,
+    val target: ForumTarget?,
 )
 
 @Composable
 private fun ForumErrorActions(
     diagnostic: ForumDiagnostic?,
     onFallbackWeb: () -> Unit,
+    alwaysAllowFallback: Boolean = false,
 ) {
-    val canFallback = diagnostic?.kind?.canFallbackToWebView() == true
+    val canFallback = alwaysAllowFallback || diagnostic?.kind?.canFallbackToWebView() == true
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -309,11 +358,11 @@ private fun ForumDiagnostic.toSafeText(): String = buildString {
     appendLine("kind=${kind.diagnosticCode()}")
     appendLine("moodleErrorCode=${moodleErrorCode ?: "-"}")
     appendLine("httpStatus=${httpStatus ?: "-"}")
-    appendLine("courseId=${target.courseId}")
-    appendLine("courseModuleId=${target.courseModuleId}")
-    appendLine("forumInstanceId=${target.forumInstanceId}")
-    appendLine("contextId=${target.contextId ?: "-"}")
-    appendLine("modName=${target.modName}")
+    appendLine("courseId=${target?.courseId ?: "-"}")
+    appendLine("courseModuleId=${target?.courseModuleId ?: "-"}")
+    appendLine("forumInstanceId=${target?.forumInstanceId ?: "-"}")
+    appendLine("contextId=${target?.contextId ?: "-"}")
+    appendLine("modName=${target?.modName ?: "-"}")
 }
 
 @Composable

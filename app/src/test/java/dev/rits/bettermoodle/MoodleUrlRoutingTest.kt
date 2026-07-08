@@ -37,8 +37,20 @@ class MoodleUrlRoutingTest {
     }
 
     @Test
+    fun `forum discussion urls are parsed as discussion targets`() {
+        assertEquals(
+            MoodleUrlTarget.ForumDiscussion(55L),
+            parseMoodleUrlTarget("https://lms.ritsumei.ac.jp/mod/forum/discuss.php?d=55"),
+        )
+        assertEquals(
+            MoodleUrlTarget.ForumDiscussion(55L),
+            parseMoodleUrlTarget("https://lms.ritsumei.ac.jp/mod/forum/discuss.php?d=55#p99"),
+        )
+        assertNull(parseMoodleUrlTarget("https://lms.ritsumei.ac.jp/mod/forum/discuss.php"))
+    }
+
+    @Test
     fun `unsupported or unsafe urls are ignored`() {
-        assertNull(parseMoodleUrlTarget("https://lms.ritsumei.ac.jp/mod/forum/discuss.php?d=55"))
         assertNull(parseMoodleUrlTarget("https://evil.example.com/mod/assign/view.php?id=1"))
         assertNull(parseMoodleUrlTarget("http://lms.ritsumei.ac.jp/mod/assign/view.php?id=1"))
         assertNull(parseMoodleUrlTarget("https://lms.ritsumei.ac.jp/mod/assign/view.php"))

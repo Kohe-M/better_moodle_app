@@ -5,6 +5,7 @@ import java.net.URI
 sealed interface MoodleUrlTarget {
     data class Course(val courseId: Long) : MoodleUrlTarget
     data class Module(val cmid: Long, val modName: String) : MoodleUrlTarget
+    data class ForumDiscussion(val discussionId: Long) : MoodleUrlTarget
 }
 
 /**
@@ -25,6 +26,11 @@ fun parseMoodleUrlTarget(url: String?): MoodleUrlTarget? {
     if (segments.size == 3 && segments[0] == "mod" && segments[2] == "view.php") {
         val cmid = parseCourseModuleIdFromUrl(source) ?: return null
         return MoodleUrlTarget.Module(cmid, segments[1])
+    }
+
+    if (segments == listOf("mod", "forum", "discuss.php")) {
+        val discussionId = parseQueryParameterId(source, "d") ?: return null
+        return MoodleUrlTarget.ForumDiscussion(discussionId)
     }
 
     if (segments.size == 2 && segments[0] == "course" && segments[1] == "view.php") {

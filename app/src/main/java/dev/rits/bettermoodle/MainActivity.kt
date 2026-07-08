@@ -64,6 +64,7 @@ import dev.rits.bettermoodle.ui.CourseScreen
 import dev.rits.bettermoodle.ui.CourseListScreen
 import dev.rits.bettermoodle.ui.DeadlinesScreen
 import dev.rits.bettermoodle.ui.FilePreviewScreen
+import dev.rits.bettermoodle.ui.ForumDiscussionScreen
 import dev.rits.bettermoodle.ui.ForumScreen
 import dev.rits.bettermoodle.ui.LoginScreen
 import dev.rits.bettermoodle.ui.MoodleWebScreen
@@ -280,6 +281,24 @@ private fun Root(container: AppContainer) {
             )
         }
 
+        composable("forumDiscussion?discussionId={discussionId}&title={title}&url={url}") { entry ->
+            ForumDiscussionScreen(
+                container = container,
+                discussionId = entry.arguments?.getString("discussionId")?.toLongOrNull() ?: 0L,
+                title = entry.arguments?.getString("title") ?: "フォーラム",
+                fallbackUrl = entry.arguments?.getString("url").orEmpty(),
+                onBack = { rootNav.popBackStack() },
+                onOpenUrl = ::openUrl,
+                onFallbackWeb = { url, fallbackTitle ->
+                    if (url.isNotBlank()) {
+                        rootNav.navigateFromUser(
+                            "moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(fallbackTitle)}",
+                        )
+                    }
+                },
+            )
+        }
+
         composable("quiz?courseId={courseId}&courseModuleId={courseModuleId}&quizInstanceId={quizInstanceId}&contextId={contextId}&modName={modName}&title={title}&url={url}") { entry ->
             val target = QuizTarget(
                 courseId = entry.arguments?.getString("courseId")?.toLongOrNull() ?: 0L,
@@ -375,6 +394,7 @@ private suspend fun resolveNativeRoute(
 ): String? {
     return when (val target = parseMoodleUrlTarget(url)) {
         is MoodleUrlTarget.Course -> courseRoute(target.courseId, title.ifBlank { "コース" }, null)
+        is MoodleUrlTarget.ForumDiscussion -> forumDiscussionRoute(target.discussionId, title, url)
         is MoodleUrlTarget.Module -> {
             if (target.modName !in setOf("assign", "quiz", "forum", "page")) return null
             val cm = runCatching {
@@ -431,6 +451,11 @@ private suspend fun resolveNativeRoute(
         null -> null
     }
 }
+
+private fun forumDiscussionRoute(discussionId: Long, title: String, url: String): String =
+    "forumDiscussion?discussionId=$discussionId" +
+        "&title=${Uri.encode(title)}" +
+        "&url=${Uri.encode(url)}"
 
 private fun forumRoute(target: ForumTarget, title: String): String =
     "forum?courseId=${target.courseId}" +
