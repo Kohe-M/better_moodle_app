@@ -85,7 +85,7 @@ class AssignmentUiModelsTest {
     }
 
     @Test
-    fun `negative feedback grade is not treated as graded`() {
+    fun `negative feedback grade is not treated as numeric grade`() {
         val ui = buildAssignmentUiModel(
             assignment = Assignment(),
             status = SubmissionStatusResponse(
@@ -100,7 +100,7 @@ class AssignmentUiModelsTest {
     }
 
     @Test
-    fun `non-negative feedback grade is treated as graded`() {
+    fun `non-negative feedback grade is treated as numeric grade`() {
         val ui = buildAssignmentUiModel(
             assignment = Assignment(),
             status = SubmissionStatusResponse(

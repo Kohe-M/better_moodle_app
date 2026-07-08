@@ -30,6 +30,7 @@ fun <T : Any> rememberLoadable(
             LoadableMemoryCache.put(cacheKey, loaded)
             UiState.Success(loaded)
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             if (cached != null) {
                 UiState.Success(cached)
             } else {

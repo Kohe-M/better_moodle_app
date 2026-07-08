@@ -65,44 +65,60 @@ private fun htmlToAnnotatedString(
     }
 
     val annotated = buildAnnotatedString {
-        body.childNodes().forEach { appendNode(it, listener) }
+        val tracker = AppendTracker()
+        body.childNodes().forEach { appendNode(it, listener, tracker) }
     }
     val end = annotated.text.indexOfLast { it != '\n' }
     return if (end < 0) AnnotatedString("") else annotated.subSequence(0, end + 1)
 }
 
+private class AppendTracker {
+    var lastChar: Char? = null
+        private set
+
+    fun record(text: String) {
+        if (text.isNotEmpty()) lastChar = text.last()
+    }
+
+    fun record(char: Char) {
+        lastChar = char
+    }
+}
+
 private fun AnnotatedString.Builder.appendNode(
     node: Node,
     linkInteractionListener: LinkInteractionListener?,
+    tracker: AppendTracker,
 ) {
     when (node) {
-        is TextNode -> appendNormalizedText(node.text())
-        is Element -> appendElement(node, linkInteractionListener)
+        is TextNode -> appendNormalizedText(node.text(), tracker)
+        is Element -> appendElement(node, linkInteractionListener, tracker)
     }
 }
 
 private fun AnnotatedString.Builder.appendElement(
     element: Element,
     linkInteractionListener: LinkInteractionListener?,
+    tracker: AppendTracker,
 ) {
     when (element.normalName()) {
-        "br" -> appendLineBreak()
-        "img" -> appendTextToken("[画像]")
+        "br" -> appendLineBreak(tracker)
+        "img" -> appendTextToken("[画像]", tracker)
         "li" -> {
-            appendLineBreakIfNeeded()
-            append("・")
-            element.childNodes().forEach { appendNode(it, linkInteractionListener) }
-            appendLineBreak()
+            appendLineBreakIfNeeded(tracker)
+            appendTracked("・", tracker)
+            element.childNodes().forEach { appendNode(it, linkInteractionListener, tracker) }
+            appendLineBreak(tracker)
         }
         "b",
         "strong",
         -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-            element.childNodes().forEach { appendNode(it, linkInteractionListener) }
+            element.childNodes().forEach { appendNode(it, linkInteractionListener, tracker) }
         }
         "a" -> {
             val href = element.attr("href").trim()
             if (href.isBlank()) {
-                element.childNodes().forEach { appendNode(it, linkInteractionListener) }
+                element.childNodes().forEach { appendNode(it, linkInteractionListener, tracker) }
             } else {
                 val start = length
                 withLink(
@@ -117,8 +133,8 @@ private fun AnnotatedString.Builder.appendElement(
                         linkInteractionListener = linkInteractionListener,
                     ),
                 ) {
-                    element.childNodes().forEach { appendNode(it, linkInteractionListener) }
-                    if (length == start) append(href)
+                    element.childNodes().forEach { appendNode(it, linkInteractionListener, tracker) }
+                    if (length == start) appendTracked(href, tracker)
                 }
             }
         }
@@ -135,49 +151,58 @@ private fun AnnotatedString.Builder.appendElement(
         "tbody",
         "thead",
         "tr",
-        -> appendBlock(element, linkInteractionListener)
-        else -> element.childNodes().forEach { appendNode(it, linkInteractionListener) }
+        -> appendBlock(element, linkInteractionListener, tracker)
+        else -> element.childNodes().forEach { appendNode(it, linkInteractionListener, tracker) }
     }
 }
 
 private fun AnnotatedString.Builder.appendBlock(
     element: Element,
     linkInteractionListener: LinkInteractionListener?,
+    tracker: AppendTracker,
 ) {
-    appendLineBreakIfNeeded()
-    element.childNodes().forEach { appendNode(it, linkInteractionListener) }
-    appendLineBreak()
+    appendLineBreakIfNeeded(tracker)
+    element.childNodes().forEach { appendNode(it, linkInteractionListener, tracker) }
+    appendLineBreak(tracker)
 }
 
-private fun AnnotatedString.Builder.appendNormalizedText(text: String) {
+private fun AnnotatedString.Builder.appendNormalizedText(text: String, tracker: AppendTracker) {
     val normalized = text.replace(Regex("\\s+"), " ").trim()
-    if (normalized.isNotEmpty()) appendTextToken(normalized)
+    if (normalized.isNotEmpty()) appendTextToken(normalized, tracker)
 }
 
-private fun AnnotatedString.Builder.appendTextToken(text: String) {
+private fun AnnotatedString.Builder.appendTextToken(text: String, tracker: AppendTracker) {
     if (length > 0) {
-        val previous = currentText().last()
+        val previous = checkNotNull(tracker.lastChar)
         if (
             previous != '\n' &&
             !previous.isWhitespace() &&
             previous != '・' &&
             text.firstOrNull()?.isSpacingPunctuation() == false
         ) {
-            append(' ')
+            appendTracked(' ', tracker)
         }
     }
+    appendTracked(text, tracker)
+}
+
+private fun AnnotatedString.Builder.appendLineBreakIfNeeded(tracker: AppendTracker) {
+    if (length > 0 && tracker.lastChar != '\n') appendTracked('\n', tracker)
+}
+
+private fun AnnotatedString.Builder.appendLineBreak(tracker: AppendTracker) {
+    if (length == 0 || tracker.lastChar != '\n') appendTracked('\n', tracker)
+}
+
+private fun AnnotatedString.Builder.appendTracked(text: String, tracker: AppendTracker) {
     append(text)
+    tracker.record(text)
 }
 
-private fun AnnotatedString.Builder.appendLineBreakIfNeeded() {
-    if (length > 0 && currentText().last() != '\n') append('\n')
+private fun AnnotatedString.Builder.appendTracked(char: Char, tracker: AppendTracker) {
+    append(char)
+    tracker.record(char)
 }
-
-private fun AnnotatedString.Builder.appendLineBreak() {
-    if (length == 0 || currentText().last() != '\n') append('\n')
-}
-
-private fun AnnotatedString.Builder.currentText(): String = toAnnotatedString().text
 
 private fun Char.isSpacingPunctuation(): Boolean =
     this in setOf(',', '.', ';', ':', '!', '?', ')', ']', '}', '・', '、', '。', '，', '．', '）', '】')

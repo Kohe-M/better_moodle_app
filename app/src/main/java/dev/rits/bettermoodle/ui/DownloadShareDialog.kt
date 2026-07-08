@@ -133,6 +133,7 @@ private fun DownloadProgress(state: DownloadShareState.Downloading) {
 
 private val downloadShareHttp = OkHttpClient()
 private const val MAX_SHARED_FILE_BYTES = 50L * 1024L * 1024L
+private const val DOWNLOAD_PROGRESS_NOTIFY_BYTES = 256L * 1024L
 private const val DOWNLOAD_CACHE_MAX_AGE_MILLIS = 24L * 60L * 60L * 1000L
 
 private suspend fun downloadSharedFile(
@@ -172,6 +173,8 @@ private suspend fun downloadSharedFile(
                 ?: inferMimeType(safeName)
 
             var copied = 0L
+            var lastProgressNotifiedBytes = 0L
+            var hasProgressNotification = false
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
             body.byteStream().use { input ->
                 tmp.outputStream().use { output ->
@@ -183,9 +186,16 @@ private suspend fun downloadSharedFile(
                             throw IOException("ファイルサイズが50MBを超えています。")
                         }
                         output.write(buffer, 0, read)
-                        onProgress(copied, length)
+                        if (copied - lastProgressNotifiedBytes >= DOWNLOAD_PROGRESS_NOTIFY_BYTES) {
+                            onProgress(copied, length)
+                            lastProgressNotifiedBytes = copied
+                            hasProgressNotification = true
+                        }
                     }
                 }
+            }
+            if (!hasProgressNotification || copied != lastProgressNotifiedBytes) {
+                onProgress(copied, length)
             }
             if (!tmp.renameTo(out)) {
                 tmp.copyTo(out, overwrite = true)

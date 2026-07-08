@@ -11,9 +11,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -152,6 +158,7 @@ private fun SubjectCell(
     onClick: (TimetableEntry) -> Unit,
 ) {
     val entry = entries.firstOrNull()
+    var showCoursePicker by remember { mutableStateOf(false) }
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -164,7 +171,12 @@ private fun SubjectCell(
                     else -> MaterialTheme.colorScheme.secondaryContainer
                 },
             )
-            .clickable(enabled = entry != null) { entry?.let(onClick) },
+            .clickable(enabled = entry != null) {
+                when {
+                    entries.size >= 2 -> showCoursePicker = true
+                    entry != null -> onClick(entry)
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         if (entry != null) {
@@ -202,5 +214,33 @@ private fun SubjectCell(
                 }
             }
         }
+    }
+
+    if (showCoursePicker) {
+        AlertDialog(
+            onDismissRequest = { showCoursePicker = false },
+            title = { Text("科目を選択") },
+            text = {
+                Column {
+                    entries.forEach { candidate ->
+                        TextButton(
+                            onClick = {
+                                showCoursePicker = false
+                                onClick(candidate)
+                            },
+                            enabled = candidate.courseId != null,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(candidate.title)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCoursePicker = false }) {
+                    Text("キャンセル")
+                }
+            },
+        )
     }
 }

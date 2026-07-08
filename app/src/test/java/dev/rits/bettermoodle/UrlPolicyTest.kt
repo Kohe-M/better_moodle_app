@@ -13,8 +13,27 @@ class UrlPolicyTest {
     fun `allows only Moodle pluginfile URL for token append`() {
         val url = "https://lms.ritsumei.ac.jp/pluginfile.php/123/mod_resource/content/1/a.pdf"
         val authed = UrlPolicy.appendMoodleToken(url, "secret")!!
-        assertTrue(authed.startsWith(url))
-        assertTrue("token=secret" in authed)
+        assertEquals(
+            "https://lms.ritsumei.ac.jp/webservice/pluginfile.php/123/mod_resource/content/1/a.pdf?token=secret",
+            authed,
+        )
+    }
+
+    @Test
+    fun `token append keeps webservice pluginfile path`() {
+        val url = "https://lms.ritsumei.ac.jp/webservice/pluginfile.php/123/mod_resource/content/1/a.pdf"
+        val authed = UrlPolicy.appendMoodleToken(url, "secret")!!
+        assertEquals("$url?token=secret", authed)
+    }
+
+    @Test
+    fun `token append rewrites bare page pluginfile path to webservice path`() {
+        val url = "https://lms.ritsumei.ac.jp/pluginfile.php/123/mod_page/content/1/a.pdf"
+        val authed = UrlPolicy.appendMoodleToken(url, "secret")!!
+        assertEquals(
+            "https://lms.ritsumei.ac.jp/webservice/pluginfile.php/123/mod_page/content/1/a.pdf?token=secret",
+            authed,
+        )
     }
 
     @Test
@@ -23,13 +42,17 @@ class UrlPolicyTest {
         val authed = UrlPolicy.appendMoodleToken(url, "new")!!
         assertTrue("forcedownload=1" in authed)
         assertTrue("token=new" in authed)
+        assertTrue(authed.startsWith("https://lms.ritsumei.ac.jp/webservice/pluginfile.php/123/a.pdf?"))
     }
 
     @Test
     fun `token append preserves already encoded pluginfile path`() {
         val url = "https://lms.ritsumei.ac.jp/pluginfile.php/123/mod_resource/content/1/%E8%AC%9B%E7%BE%A9.pdf?forcedownload=1"
         val authed = UrlPolicy.appendMoodleToken(url, "secret token")!!
-        assertEquals("$url&token=secret+token", authed)
+        assertEquals(
+            "https://lms.ritsumei.ac.jp/webservice/pluginfile.php/123/mod_resource/content/1/%E8%AC%9B%E7%BE%A9.pdf?forcedownload=1&token=secret+token",
+            authed,
+        )
         assertFalse("%25" in authed)
         assertTrue("/content/1/%E8%AC%9B%E7%BE%A9.pdf?forcedownload=1&token=" in authed)
     }

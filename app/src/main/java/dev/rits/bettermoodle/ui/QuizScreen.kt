@@ -54,6 +54,8 @@ import dev.rits.bettermoodle.data.quizHttpStatus
 import dev.rits.bettermoodle.data.quizLoadErrorMessage
 import dev.rits.bettermoodle.data.quizMoodleErrorCode
 import dev.rits.bettermoodle.data.quizTimeLimitLabel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 
 private data class QuizUiData(
     val quiz: Quiz,
@@ -99,13 +101,20 @@ fun QuizScreen(
         state = try {
             val quiz = container.moodleRepository.quiz(target.courseId, target.courseModuleId)
                 ?: throw MoodleWsException("invalidrecord", "Quiz not found")
-            UiState.Success(
+            val quizData = coroutineScope {
+                val attempts = async { container.moodleRepository.quizAttempts(quiz.id) }
+                val bestGrade = async { container.moodleRepository.quizBestGrade(quiz.id) }
+                val access = async { container.moodleRepository.quizAccessInformation(quiz.id) }
+
                 QuizUiData(
                     quiz = quiz,
-                    attempts = container.moodleRepository.quizAttempts(quiz.id),
-                    bestGrade = container.moodleRepository.quizBestGrade(quiz.id),
-                    access = container.moodleRepository.quizAccessInformation(quiz.id),
-                ),
+                    attempts = attempts.await(),
+                    bestGrade = bestGrade.await(),
+                    access = access.await(),
+                )
+            }
+            UiState.Success(
+                quizData,
             )
         } catch (error: Exception) {
             val kind = classifyQuizLoadError(error)

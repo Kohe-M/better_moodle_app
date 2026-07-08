@@ -85,7 +85,7 @@ object UrlPolicy {
         val query = uri.rawQuery
         val tokenParam = "token=${URLEncoder.encode(token, Charsets.UTF_8.name())}"
         val separator = if (query.isNullOrBlank()) "?" else "&"
-        return source + separator + tokenParam
+        return rewriteBarePluginFilePath(source, uri) + separator + tokenParam
     }
 
     private fun parse(url: String): URI? =
@@ -101,6 +101,22 @@ object UrlPolicy {
         if (sensitiveQueryNames.any { hasQueryParameter(uri.rawQuery, it) }) return true
         val fragment = uri.rawFragment.orEmpty().lowercase()
         return sensitiveQueryNames.any { "$it=" in fragment }
+    }
+
+    private fun rewriteBarePluginFilePath(source: String, uri: URI): String {
+        val rawPath = uri.rawPath.orEmpty()
+        if (rawPath != "/pluginfile.php" && !rawPath.startsWith("/pluginfile.php/")) {
+            return source
+        }
+        val authority = uri.rawAuthority ?: return source
+        val authorityStart = source.indexOf("//").takeIf { it >= 0 }?.plus(2) ?: return source
+        val pathStart = authorityStart + authority.length
+        if (!source.startsWith("/pluginfile.php", pathStart)) return source
+        return source.replaceRange(
+            pathStart,
+            pathStart + "/pluginfile.php".length,
+            "/webservice/pluginfile.php",
+        )
     }
 
 }

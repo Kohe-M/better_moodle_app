@@ -22,14 +22,23 @@ class MoodleRepository(
 
     /** 今後の締切イベント (課題・小テスト等)。公式アプリのタイムラインと同じAPI。 */
     suspend fun upcomingEvents(fromEpochSec: Long, limit: Int = 50): List<ActionEvent> {
-        val resp: ActionEventsResponse = client.callAs(
-            "core_calendar_get_action_events_by_timesort",
-            mapOf(
-                "timesortfrom" to fromEpochSec.toString(),
-                "limitnum" to limit.toString(),
-            ),
-        )
-        return resp.events
+        val events = mutableListOf<ActionEvent>()
+        var afterEventId: Long? = null
+        var pagesFetched = 0
+        var received: Int
+
+        do {
+            val resp: ActionEventsResponse = client.callAs(
+                "core_calendar_get_action_events_by_timesort",
+                actionEventsParams(fromEpochSec, limit, afterEventId),
+            )
+            received = resp.events.size
+            events += resp.events
+            pagesFetched += 1
+            afterEventId = resp.lastid
+        } while (shouldFetchNextPage(limit, received, pagesFetched))
+
+        return events
     }
 
     /** 課題・小テストの締切だけに絞ったイベント */
@@ -215,6 +224,17 @@ class MoodleRepository(
 
     companion object {
         val DEADLINE_MODULES = setOf("assign", "quiz", "workshop", "lesson")
+        private const val MAX_ACTION_EVENT_PAGES = 3
+
+        fun shouldFetchNextPage(pageSize: Int, received: Int, pagesFetched: Int): Boolean =
+            pageSize > 0 && received >= pageSize && pagesFetched < MAX_ACTION_EVENT_PAGES
+
+        fun actionEventsParams(fromEpochSec: Long, limit: Int, afterEventId: Long? = null): Map<String, String> =
+            buildMap {
+                put("timesortfrom", fromEpochSec.toString())
+                put("limitnum", limit.toString())
+                afterEventId?.let { put("aftereventid", it.toString()) }
+            }
 
         fun forumDiscussionsParams(forumInstanceId: Long): Map<String, String> =
             mapOf(
