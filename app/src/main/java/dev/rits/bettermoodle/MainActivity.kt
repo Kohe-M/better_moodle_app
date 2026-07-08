@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Alarm
@@ -50,6 +51,7 @@ import dev.rits.bettermoodle.data.QuizTarget
 import dev.rits.bettermoodle.data.UrlPolicy
 import dev.rits.bettermoodle.ui.AssignmentScreen
 import dev.rits.bettermoodle.ui.CourseScreen
+import dev.rits.bettermoodle.ui.CourseListScreen
 import dev.rits.bettermoodle.ui.DeadlinesScreen
 import dev.rits.bettermoodle.ui.FilePreviewScreen
 import dev.rits.bettermoodle.ui.ForumScreen
@@ -105,6 +107,16 @@ private fun Root(container: AppContainer) {
     val rootNav = rememberNavController()
     NavHost(navController = rootNav, startDestination = "main") {
         composable("main") { MainTabs(container, rootNav) }
+
+        composable("courses") {
+            CourseListScreen(
+                container = container,
+                onBack = { rootNav.popBackStack() },
+                onOpenCourse = { id, name, code ->
+                    rootNav.navigate(courseRoute(id, name, code))
+                },
+            )
+        }
 
         composable("course/{courseId}?name={name}&code={code}") { entry ->
             val id = entry.arguments?.getString("courseId")?.toLongOrNull() ?: 0L
@@ -263,6 +275,9 @@ private data class NavItem(
     val icon: ImageVector,
 )
 
+private fun courseRoute(id: Long, name: String, code: String?): String =
+    "course/$id?name=${Uri.encode(name)}&code=${Uri.encode(code ?: "")}"
+
 private fun forumRoute(target: ForumTarget, title: String): String =
     "forum?courseId=${target.courseId}" +
         "&courseModuleId=${target.courseModuleId}" +
@@ -300,7 +315,7 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
     val currentRoute = backStack?.destination?.route
 
     fun openCourse(id: Long, name: String, code: String?) {
-        rootNav.navigate("course/$id?name=${Uri.encode(name)}&code=${Uri.encode(code ?: "")}")
+        rootNav.navigate(courseRoute(id, name, code))
     }
 
     fun openUrl(url: String, title: String) {
@@ -316,6 +331,11 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
             CenterAlignedTopAppBar(
                 title = { Text(items.firstOrNull { it.route == currentRoute }?.label ?: "Moodle+R") },
                 actions = {
+                    if (currentRoute == "timetable") {
+                        IconButton(onClick = { rootNav.navigate("courses") }) {
+                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = "すべてのコース")
+                        }
+                    }
                     IconButton(onClick = { showLogout = true }) {
                         Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "ログアウト")
                     }
