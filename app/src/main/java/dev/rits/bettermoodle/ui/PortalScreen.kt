@@ -62,8 +62,8 @@ fun PortalScreen(onClearAllWebSessions: suspend () -> Unit = {}) {
                             view: WebView?,
                             request: WebResourceRequest?,
                         ): Boolean {
-                            if (request?.isForMainFrame != true) return false
-                            val url = request?.url?.toString() ?: return true
+                            if (request == null || !request.isForMainFrame) return false
+                            val url = request.url?.toString() ?: return true
                             if (UrlPolicy.isAllowedPortalWebViewUrl(url)) return false
                             if (UrlPolicy.canOpenExternally(url)) openInCustomTab(context, url)
                             return true

@@ -38,7 +38,8 @@ class MoodleRepository(
             afterEventId = resp.lastid
         } while (shouldFetchNextPage(limit, received, pagesFetched))
 
-        return events
+        // lastidが欠けた応答で同一ページを再取得しても、下流のLazyColumnのキー重複を起こさない
+        return events.distinctBy { it.id }
     }
 
     /** 課題・小テストの締切だけに絞ったイベント */
@@ -187,14 +188,21 @@ class MoodleRepository(
         return resp.posts
     }
 
+    @Volatile
+    private var lastAutologinKeyRequestAtMillis = 0L
+
     /**
      * ブラウザで開くための自動ログインURLを生成する。
      * tool_mobile_get_autologin_key はレート制限 (数分に1回) があるため、
+     * 制限内の再要求はWS呼び出し自体を省いて即nullを返す。
      * 失敗時は呼び出し側で元URLにフォールバックすること。
      */
     suspend fun autologinUrl(targetUrl: String): String? = runCatching {
         if (!UrlPolicy.canUseMoodleAutologin(targetUrl)) return null
         val privateToken = client.privateToken() ?: return null
+        val now = System.currentTimeMillis()
+        if (now - lastAutologinKeyRequestAtMillis < AUTOLOGIN_KEY_MIN_INTERVAL_MILLIS) return null
+        lastAutologinKeyRequestAtMillis = now
         val key: AutologinKey = client.callAs(
             "tool_mobile_get_autologin_key",
             mapOf("privatetoken" to privateToken),
@@ -203,7 +211,10 @@ class MoodleRepository(
         if (!UrlPolicy.isAllowedMoodleUrl(key.autologinurl)) return null
         val encoded = java.net.URLEncoder.encode(targetUrl, "UTF-8")
         "${key.autologinurl}?key=${key.key}&urltogo=$encoded"
-    }.getOrNull()
+    }.getOrElse { error ->
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        null
+    }
 
     /** pluginfile等のファイルURLにトークンを付与する (認証付きダウンロード用) */
     fun authedFileUrl(fileUrl: String): String? = client.authedUrl(fileUrl)
@@ -225,6 +236,9 @@ class MoodleRepository(
     companion object {
         val DEADLINE_MODULES = setOf("assign", "quiz", "workshop", "lesson")
         private const val MAX_ACTION_EVENT_PAGES = 3
+
+        // サイト側の tool_mobile_get_autologin_key レート制限 (6分) に合わせる
+        private const val AUTOLOGIN_KEY_MIN_INTERVAL_MILLIS = 6 * 60 * 1000L
 
         fun shouldFetchNextPage(pageSize: Int, received: Int, pagesFetched: Int): Boolean =
             pageSize > 0 && received >= pageSize && pagesFetched < MAX_ACTION_EVENT_PAGES

@@ -103,6 +103,7 @@ fun PageScreen(
                 ?: throw MoodleWsException("invalidrecord", "Page not found")
             UiState.Success(page)
         } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
             val kind = classifyPageLoadError(error)
             diagnostic = PageDiagnostic(
                 kind = kind,

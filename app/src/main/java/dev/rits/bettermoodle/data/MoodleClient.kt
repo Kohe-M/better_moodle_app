@@ -1,21 +1,27 @@
 package dev.rits.bettermoodle.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.Response
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Moodle Web Service (REST) クライアント。
@@ -63,7 +69,7 @@ class MoodleClient(
                 .post(body)
                 .build()
 
-            http.newCall(request).execute().use { resp ->
+            executeCancellable(http.newCall(request)).use { resp ->
                 if (!resp.isSuccessful) throw MoodleHttpException(resp.code)
                 val text = resp.body?.string() ?: throw IOException("空のレスポンス")
                 val element = runCatching { json.parseToJsonElement(text) }
@@ -80,6 +86,28 @@ class MoodleClient(
 
     suspend inline fun <reified T> callAs(wsFunction: String, params: Map<String, String> = emptyMap()): T =
         json.decodeFromJsonElement(call(wsFunction, params))
+
+    /**
+     * コルーチンのキャンセルでOkHttp呼び出しも中断する実行。
+     * ブロッキングの execute() だと withTimeout や画面離脱によるキャンセルが
+     * HTTPタイムアウトまで効かないため、enqueue ベースにする。
+     */
+    private suspend fun executeCancellable(call: Call): Response =
+        suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (cont.isCancelled) return
+                    cont.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    // キャンセルと競合した場合は resume できないので閉じて捨てる
+                    runCatching { cont.resume(response) }
+                        .onFailure { response.close() }
+                }
+            })
+        }
 
     suspend fun uploadFile(file: File, filename: String): List<UploadedFile> =
         withContext(Dispatchers.IO) {

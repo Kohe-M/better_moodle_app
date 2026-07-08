@@ -39,7 +39,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.BuildConfig
 import dev.rits.bettermoodle.data.UrlPolicy
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URI
+
+private const val AUTOLOGIN_ATTEMPT_TIMEOUT_MILLIS = 5_000L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
@@ -62,7 +65,10 @@ fun MoodleWebScreen(
         initialUrl = null
         loading = true
         if (canLoadOriginalUrl) {
-            initialUrl = container.moodleRepository.autologinUrl(url) ?: url
+            // オフライン等でHTTPタイムアウトまで待たされないよう、autologin試行は短時間で打ち切る
+            initialUrl = withTimeoutOrNull(AUTOLOGIN_ATTEMPT_TIMEOUT_MILLIS) {
+                container.moodleRepository.autologinUrl(url)
+            } ?: url
         }
     }
 
@@ -116,8 +122,8 @@ fun MoodleWebScreen(
                                         view: WebView?,
                                         request: WebResourceRequest?,
                                     ): Boolean {
-                                        if (request?.isForMainFrame != true) return false
-                                        val target = request?.url?.toString() ?: return true
+                                        if (request == null || !request.isForMainFrame) return false
+                                        val target = request.url?.toString() ?: return true
                                         if (BuildConfig.DEBUG) {
                                             Log.d("MoodleWeb", "navigate: ${debugUrlLabel(target)}")
                                         }

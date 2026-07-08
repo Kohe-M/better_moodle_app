@@ -82,6 +82,7 @@ fun ForumScreen(
         discussionState = try {
             UiState.Success(container.moodleRepository.forumDiscussions(target.forumInstanceId))
         } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
             val kind = classifyForumLoadError(error)
             lastDiagnostic = ForumDiagnostic(
                 stage = "DISCUSSION_LIST",
@@ -212,6 +213,7 @@ private fun DiscussionPosts(
             diagnostic = null
             container.moodleRepository.forumPosts(discussionId)
         } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
             val kind = classifyForumLoadError(error)
             diagnostic = ForumDiagnostic(
                 stage = "DISCUSSION_POSTS",

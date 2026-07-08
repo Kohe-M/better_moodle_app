@@ -232,12 +232,11 @@ fun CourseScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    s.data.filter {
-                        it.uservisible &&
-                            (it.modules.isNotEmpty() || htmlToPlainText(it.summary).isNotBlank())
-                    }.forEach { section ->
+                    s.data.filter { it.uservisible }.forEach { section ->
+                        val hasSummary = htmlToPlainText(section.summary).isNotBlank()
+                        if (section.modules.isEmpty() && !hasSummary) return@forEach
                         item(key = "sec-${section.id}") { SectionHeader(section) }
-                        if (htmlToPlainText(section.summary).isNotBlank()) {
+                        if (hasSummary) {
                             item(key = "sec-summary-${section.id}") {
                                 SectionSummary(section, onOpenUrl)
                             }

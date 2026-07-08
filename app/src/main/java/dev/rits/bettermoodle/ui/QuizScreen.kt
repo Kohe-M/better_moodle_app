@@ -117,6 +117,7 @@ fun QuizScreen(
                 quizData,
             )
         } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
             val kind = classifyQuizLoadError(error)
             diagnostic = QuizDiagnostic(
                 stage = "QUIZ_SUMMARY",
