@@ -50,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.CourseModule
@@ -230,23 +231,29 @@ fun CourseScreen(
                 is UiState.Success -> LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
+                    // セクション = 見出し + 連結カードスタック (概要・ラベル・アクティビティ)。
+                    // スタック内は2dpの隙間と小さい角丸で「ひとまとまり」に見せる。
                     s.data.filter { it.uservisible }.forEach { section ->
                         val hasSummary = htmlToPlainText(section.summary).isNotBlank()
                         if (section.modules.isEmpty() && !hasSummary) return@forEach
                         item(key = "sec-${section.id}") { SectionHeader(section) }
+                        val groups = groupSectionModules(section.modules.filter { it.uservisible })
+                        val stackSize = groups.size + if (hasSummary) 1 else 0
                         if (hasSummary) {
+                            val position = sectionStackPosition(0, stackSize)
                             item(key = "sec-summary-${section.id}") {
-                                SectionSummary(section, onOpenUrl)
+                                SectionSummary(section, onOpenUrl, position)
                             }
                         }
-                        val visibleModules = section.modules.filter { it.uservisible }
-                        groupSectionModules(visibleModules).forEachIndexed { index, group ->
+                        val offset = if (hasSummary) 1 else 0
+                        groups.forEachIndexed { index, group ->
                             val keyModule = group.module ?: group.labels.firstOrNull()
+                            val position = sectionStackPosition(index + offset, stackSize)
                             item(key = "mod-${section.id}-${keyModule?.id ?: index}") {
                                 ModuleGroupItem(
                                     group = group,
+                                    position = position,
                                     onOpenUrl = onOpenUrl,
                                     onOpenModule = ::openModule,
                                 )
@@ -370,64 +377,111 @@ private fun SectionHeader(section: CourseSection) {
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+        modifier = Modifier.padding(top = 16.dp, bottom = 6.dp),
     )
 }
+
+/**
+ * セクション内スタックでの位置。外側の角は大きく、隣接する内側の角は
+ * 小さく丸めることで、複数カードを1つのまとまりとして見せる。
+ */
+private data class SectionStackPosition(val isFirst: Boolean, val isLast: Boolean) {
+    private val topRadius: Dp get() = if (isFirst) 12.dp else 4.dp
+    private val bottomRadius: Dp get() = if (isLast) 12.dp else 4.dp
+
+    fun shape() = RoundedCornerShape(
+        topStart = topRadius,
+        topEnd = topRadius,
+        bottomEnd = bottomRadius,
+        bottomStart = bottomRadius,
+    )
+
+    fun topShape() = RoundedCornerShape(
+        topStart = topRadius,
+        topEnd = topRadius,
+        bottomEnd = 0.dp,
+        bottomStart = 0.dp,
+    )
+
+    fun bottomShape() = RoundedCornerShape(
+        topStart = 0.dp,
+        topEnd = 0.dp,
+        bottomEnd = bottomRadius,
+        bottomStart = bottomRadius,
+    )
+
+    /** スタック内の連結を保ったまま、要素間に細い隙間を空ける */
+    fun itemSpacing(): Dp = if (isFirst) 0.dp else 2.dp
+}
+
+private fun sectionStackPosition(index: Int, count: Int) =
+    SectionStackPosition(isFirst = index == 0, isLast = index == count - 1)
 
 @Composable
 private fun SectionSummary(
     section: CourseSection,
     onOpenUrl: (url: String, title: String) -> Unit,
+    position: SectionStackPosition,
 ) {
-    HtmlText(
-        html = section.summary,
-        onOpenUrl = { onOpenUrl(it, section.name.ifBlank { "Moodle" }) },
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
-    )
+    Surface(
+        shape = position.shape(),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = position.itemSpacing()),
+    ) {
+        HtmlText(
+            html = section.summary,
+            onOpenUrl = { onOpenUrl(it, section.name.ifBlank { "Moodle" }) },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(12.dp),
+        )
+    }
 }
 
 @Composable
 private fun ModuleGroupItem(
     group: ModuleGroup,
+    position: SectionStackPosition,
     onOpenUrl: (url: String, title: String) -> Unit,
     onOpenModule: (CourseModule) -> Unit,
 ) {
     val module = group.module
+    val stackModifier = Modifier
+        .fillMaxWidth()
+        .padding(top = position.itemSpacing())
     if (module == null) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+        Surface(
+            shape = position.shape(),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = stackModifier,
         ) {
-            group.labels.forEach { LabelText(it, onOpenUrl) }
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                group.labels.forEach { LabelText(it, onOpenUrl, modifier = Modifier) }
+            }
         }
     } else if (group.labels.isEmpty()) {
         ModuleRow(
             module = module,
             onOpenUrl = onOpenUrl,
+            shape = position.shape(),
+            modifier = stackModifier,
             onClick = { onOpenModule(module) },
         )
     } else {
-        Column(Modifier.fillMaxWidth()) {
+        Column(stackModifier) {
             ModuleRow(
                 module = module,
                 onOpenUrl = onOpenUrl,
-                shape = RoundedCornerShape(
-                    topStart = 12.dp,
-                    topEnd = 12.dp,
-                    bottomEnd = 0.dp,
-                    bottomStart = 0.dp,
-                ),
+                shape = position.topShape(),
                 onClick = { onOpenModule(module) },
             )
             Surface(
-                shape = RoundedCornerShape(
-                    topStart = 0.dp,
-                    topEnd = 0.dp,
-                    bottomEnd = 12.dp,
-                    bottomStart = 12.dp,
-                ),
+                shape = position.bottomShape(),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -462,13 +516,14 @@ fun ModuleRow(
     module: CourseModule,
     onOpenUrl: (url: String, title: String) -> Unit,
     shape: RoundedCornerShape = RoundedCornerShape(12.dp),
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     Surface(
         onClick = onClick,
         shape = shape,
         color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
