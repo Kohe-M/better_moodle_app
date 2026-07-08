@@ -124,6 +124,18 @@ data class Course(
     }
 }
 
+@Serializable
+data class CourseModuleInfoResponse(val cm: CourseModuleInfo? = null)
+
+@Serializable
+data class CourseModuleInfo(
+    val id: Long = 0,
+    val course: Long = 0,
+    @SerialName("modname") val modName: String = "",
+    val instance: Long = 0,
+    val name: String = "",
+)
+
 /** 時間割の1コマ */
 data class TimetableEntry(
     val dayIndex: Int,          // 0=月 ... 6=日

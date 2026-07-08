@@ -59,6 +59,16 @@ class MoodleRepository(
     suspend fun courseContents(courseId: Long): List<CourseSection> =
         client.callAs("core_course_get_contents", mapOf("courseid" to courseId.toString()))
 
+    /** cmidからコースID・インスタンスID・モジュール種別を補完する (通知URL等のネイティブ解決用) */
+    suspend fun courseModule(cmid: Long): CourseModuleInfo? {
+        require(cmid > 0L) { "Invalid course module ID" }
+        val resp: CourseModuleInfoResponse = client.callAs(
+            "core_course_get_course_module",
+            mapOf("cmid" to cmid.toString()),
+        )
+        return resp.cm?.takeIf { it.id > 0L && it.course > 0L }
+    }
+
     suspend fun assignments(courseId: Long): List<Assignment> {
         val resp: AssignmentsResponse = client.callAs(
             "mod_assign_get_assignments",
