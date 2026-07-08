@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.CalendarViewMonth
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.AlertDialog
@@ -32,6 +33,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -39,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -368,6 +371,8 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var showLogout by remember { mutableStateOf(false) }
+    var showClearWebSessions by remember { mutableStateOf(false) }
+    var portalClearSessionTick by remember { mutableIntStateOf(0) }
 
     val navController = rememberNavController()
     val items = listOf(
@@ -395,17 +400,28 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(items.firstOrNull { it.route == currentRoute }?.label ?: "Moodle+R") },
+                title = {
+                    Text(
+                        items.firstOrNull { it.route == currentRoute }?.label ?: "Moodle+R",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                },
                 actions = {
                     if (currentRoute == "timetable") {
                         IconButton(onClick = { rootNav.navigate("courses") }) {
                             Icon(Icons.AutoMirrored.Filled.List, contentDescription = "すべてのコース")
                         }
                     }
+                    if (currentRoute == "portal") {
+                        IconButton(onClick = { showClearWebSessions = true }) {
+                            Icon(Icons.Filled.CleaningServices, contentDescription = "Webセッションを削除")
+                        }
+                    }
                     IconButton(onClick = { showLogout = true }) {
                         Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "ログアウト")
                     }
                 },
+                expandedHeight = 48.dp,
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.primary,
@@ -459,11 +475,29 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
             composable("notifications") { NotificationsScreen(container, onOpenUrl = ::openUrl) }
             composable("syllabus") { SyllabusScreen(container) }
             composable("portal") {
-                PortalScreen(onClearAllWebSessions = {
-                    container.clearAllWebSessions()
-                })
+                PortalScreen(clearSessionTick = portalClearSessionTick)
             }
         }
+    }
+
+    if (showClearWebSessions) {
+        AlertDialog(
+            onDismissRequest = { showClearWebSessions = false },
+            title = { Text("Webセッションを削除") },
+            text = { Text("Moodle側のWebログイン状態も削除されます。よろしいですか?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearWebSessions = false
+                    scope.launch {
+                        container.clearAllWebSessions()
+                        portalClearSessionTick++
+                    }
+                }) { Text("削除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearWebSessions = false }) { Text("キャンセル") }
+            },
+        )
     }
 
     if (showLogout) {

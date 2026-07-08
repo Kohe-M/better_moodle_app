@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.Timetable
 import dev.rits.bettermoodle.data.TimetableEntry
+import dev.rits.bettermoodle.data.timetableCellsConnected
 import java.time.LocalDate
 
 /**
@@ -89,9 +90,19 @@ private fun TimetableGrid(
                 PeriodCell(period, Modifier.width(36.dp))
                 timetable.dayLabels.forEachIndexed { dayIdx, _ ->
                     val entries = byCell[dayIdx to period].orEmpty()
+                    val connectedAbove = timetableCellsConnected(
+                        byCell[dayIdx to (period - 1)].orEmpty(),
+                        entries,
+                    )
+                    val connectedBelow = timetableCellsConnected(
+                        entries,
+                        byCell[dayIdx to (period + 1)].orEmpty(),
+                    )
                     SubjectCell(
                         entries = entries,
                         highlight = dayIdx == todayIndex,
+                        connectedAbove = connectedAbove,
+                        connectedBelow = connectedBelow,
                         modifier = Modifier.weight(1f),
                         onClick = { entry ->
                             val id = entry.courseId
@@ -154,6 +165,8 @@ private fun PeriodCell(period: Int, modifier: Modifier) {
 private fun SubjectCell(
     entries: List<TimetableEntry>,
     highlight: Boolean,
+    connectedAbove: Boolean,
+    connectedBelow: Boolean,
     modifier: Modifier,
     onClick: (TimetableEntry) -> Unit,
 ) {
@@ -162,8 +175,20 @@ private fun SubjectCell(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .padding(2.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .padding(
+                start = 2.dp,
+                top = if (connectedAbove) 0.dp else 2.dp,
+                end = 2.dp,
+                bottom = if (connectedBelow) 0.dp else 2.dp,
+            )
+            .clip(
+                RoundedCornerShape(
+                    topStart = if (connectedAbove) 0.dp else 10.dp,
+                    topEnd = if (connectedAbove) 0.dp else 10.dp,
+                    bottomEnd = if (connectedBelow) 0.dp else 10.dp,
+                    bottomStart = if (connectedBelow) 0.dp else 10.dp,
+                ),
+            )
             .background(
                 when {
                     entry == null -> MaterialTheme.colorScheme.surface
@@ -179,7 +204,7 @@ private fun SubjectCell(
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (entry != null) {
+        if (entry != null && !connectedAbove) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(horizontal = 3.dp, vertical = 4.dp),

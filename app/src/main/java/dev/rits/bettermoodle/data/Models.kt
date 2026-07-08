@@ -138,6 +138,20 @@ data class TimetableEntry(
         get() = courseUrl?.let { Regex("[?&]id=(\\d+)").find(it)?.groupValues?.get(1)?.toLongOrNull() }
 }
 
+fun timetableCellsConnected(above: List<TimetableEntry>, below: List<TimetableEntry>): Boolean {
+    if (above.size != 1 || below.size != 1) return false
+
+    val aboveEntry = above.single()
+    val belowEntry = below.single()
+    val courseCode = aboveEntry.courseCode
+    if (courseCode != null) {
+        return courseCode == belowEntry.courseCode
+    }
+
+    val courseUrl = aboveEntry.courseUrl
+    return belowEntry.courseCode == null && courseUrl != null && courseUrl == belowEntry.courseUrl
+}
+
 data class Timetable(
     val entries: List<TimetableEntry>,
     val dayLabels: List<String>,
