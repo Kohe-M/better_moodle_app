@@ -60,10 +60,20 @@ object SsoLogin {
             val location = resp.header("Location")
             val tokens = tokensFromLocationHeader(location, passport)
             if (dev.rits.bettermoodle.BuildConfig.DEBUG) {
+                val isScheme = location != null && isTokenSchemeUrl(location)
+                // トークンを含み得るためスキームURLはラベルを出さない。それ以外はホスト+パスのみ。
+                val locationLabel = when {
+                    location == null -> "-"
+                    isScheme -> "(token-scheme)"
+                    else -> runCatching {
+                        val uri = java.net.URI(location.trim())
+                        "${uri.scheme}://${uri.host.orEmpty()}${uri.path.orEmpty()}"
+                    }.getOrDefault("(unparseable)")
+                }
                 android.util.Log.d(
                     "SsoLogin",
                     "probe http=${resp.code} hasCookie=${!cookieHeader.isNullOrBlank()} " +
-                        "schemeLocation=${location != null && isTokenSchemeUrl(location)} tokens=${tokens != null}",
+                        "schemeLocation=$isScheme tokens=${tokens != null} location=$locationLabel",
                 )
             }
             tokens

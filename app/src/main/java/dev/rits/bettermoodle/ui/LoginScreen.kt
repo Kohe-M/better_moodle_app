@@ -39,6 +39,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.URI
+
+/** Logcat用 (DEBUGのみ): スキーム+ホスト+パスのみ。クエリ・フラグメントは出さない。 */
+private fun loginDebugUrlLabel(url: String): String {
+    val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return "(unparseable)"
+    val scheme = uri.scheme?.lowercase() ?: return "(no-scheme)"
+    return if (scheme == "http" || scheme == "https") {
+        "$scheme://${uri.host.orEmpty()}${uri.path.orEmpty()}"
+    } else {
+        "$scheme://"
+    }
+}
 
 /**
  * ログイン画面。
@@ -145,8 +157,18 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                         ): Boolean {
                             val url = request?.url?.toString() ?: return false
                             if (handleTokenUrl(url)) return true
+                            // SSOの連鎖は大学/Microsoft側の構成変更で経由ホストが増え得るため、
+                            // ログインWebViewに限りhttpsは全て許可する (トークンの真正性は
+                            // parseTokenUrl のmd5署名検証が担保する)。
                             // http(s)以外のスキームはWebViewに渡さない (ERR_UNKNOWN_URL_SCHEME 防止)
-                            return !UrlPolicy.isAllowedSsoWebViewUrl(url)
+                            val allowed = UrlPolicy.isHttpsUrl(url)
+                            if (BuildConfig.DEBUG) {
+                                android.util.Log.d(
+                                    "LoginWeb",
+                                    "navigate ${if (allowed) "allow" else "block"}: ${loginDebugUrlLabel(url)}",
+                                )
+                            }
+                            return !allowed
                         }
 
                         override fun onPageStarted(
@@ -154,11 +176,17 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                             url: String?,
                             favicon: android.graphics.Bitmap?,
                         ) {
+                            if (BuildConfig.DEBUG && url != null) {
+                                android.util.Log.d("LoginWeb", "pageStarted: ${loginDebugUrlLabel(url)}")
+                            }
                             if (handleTokenUrl(url)) view?.stopLoading()
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             val current = url ?: return
+                            if (BuildConfig.DEBUG) {
+                                android.util.Log.d("LoginWeb", "pageFinished: ${loginDebugUrlLabel(current)}")
+                            }
                             if (tokenDelivered || probing) return
                             // カスタムスキームへの302はWebViewがコールバックなしに破棄する
                             // ことがあるため、lmsホストのページに戻ってきたタイミングで
