@@ -2,6 +2,7 @@ package dev.rits.bettermoodle
 
 import dev.rits.bettermoodle.auth.SsoLogin
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -56,6 +57,14 @@ class SsoLoginTest {
         val payload = URLEncoder.encode(encode("$signature:::aabbccddeeff00112233"), "UTF-8")
         val tokens = SsoLogin.parseTokenUrl("bettermoodle://token=$payload", passport)!!
         assertEquals("aabbccddeeff00112233", tokens.wsToken)
+    }
+
+    @Test
+    fun `token scheme URL detection`() {
+        assertTrue(SsoLogin.isTokenSchemeUrl("bettermoodle://token=abc"))
+        assertTrue(SsoLogin.isTokenSchemeUrl(" BetterMoodle://token=abc "))
+        assertFalse(SsoLogin.isTokenSchemeUrl("moodlemobile://token=abc"))
+        assertFalse(SsoLogin.isTokenSchemeUrl("https://lms.ritsumei.ac.jp/my/"))
     }
 
     @Test

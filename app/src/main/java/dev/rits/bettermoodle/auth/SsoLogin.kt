@@ -32,6 +32,10 @@ object SsoLogin {
     fun launchUrl(passport: String): String =
         "${MoodleClient.LAUNCH_URL}?service=moodle_mobile_app&passport=$passport&urlscheme=${MoodleClient.URL_SCHEME}"
 
+    /** アプリのコールバックスキーム (bettermoodle://) へのリダイレクトかどうか */
+    fun isTokenSchemeUrl(url: String): Boolean =
+        url.trim().startsWith("${MoodleClient.URL_SCHEME}://", ignoreCase = true)
+
     /**
      * "bettermoodle://token=..." 形式のURLからトークンを取り出す。
      * 対象外のURL (通常のhttpページ等) はnull。

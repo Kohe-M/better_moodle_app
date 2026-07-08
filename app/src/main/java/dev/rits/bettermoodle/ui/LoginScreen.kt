@@ -2,6 +2,7 @@ package dev.rits.bettermoodle.ui
 
 import android.annotation.SuppressLint
 import android.webkit.CookieManager
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -43,9 +44,33 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
     var showWebView by remember { mutableStateOf(false) }
     var showManual by remember { mutableStateOf(false) }
     var manualToken by remember { mutableStateOf("") }
+    var loginError by remember { mutableStateOf<String?>(null) }
     val passport = remember { SsoLogin.newPassport() }
 
     if (showWebView) {
+        val error = loginError
+        if (error != null) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(error, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        loginError = null
+                        showWebView = false
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("やり直す")
+                }
+            }
+            return
+        }
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
@@ -57,19 +82,57 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                     settings.safeBrowsingEnabled = true
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
                     webViewClient = object : WebViewClient() {
+                        private var tokenHandled = false
+
+                        /**
+                         * トークンURL (bettermoodle://token=...) ならここで回収してtrueを返す。
+                         * KMSI (「ログイン状態を維持しますか?」) はフォームPOSTで送信され、
+                         * POST起点のリダイレクトでは shouldOverrideUrlLoading が呼ばれないため、
+                         * onPageStarted / onReceivedError (ERR_UNKNOWN_URL_SCHEME) からも拾う。
+                         */
+                        private fun handleTokenUrl(url: String?): Boolean {
+                            val target = url ?: return false
+                            if (!SsoLogin.isTokenSchemeUrl(target)) return false
+                            if (tokenHandled) return true
+                            val tokens = SsoLogin.parseTokenUrl(target, passport)
+                            if (tokens != null) {
+                                tokenHandled = true
+                                onToken(tokens)
+                            } else {
+                                loginError = "ログイン情報を受け取れませんでした。もう一度お試しください。"
+                            }
+                            return true
+                        }
+
                         override fun shouldOverrideUrlLoading(
                             view: WebView?,
                             request: WebResourceRequest?,
                         ): Boolean {
                             val url = request?.url?.toString() ?: return false
-                            val tokens = SsoLogin.parseTokenUrl(url, passport)
-                            if (tokens != null) {
-                                onToken(tokens)
-                                return true
-                            }
-                            // moodlemobile:// などhttp以外のスキームはWebViewに渡さない
-                            // (ERR_UNKNOWN_URL_SCHEME 防止)
+                            if (handleTokenUrl(url)) return true
+                            // http(s)以外のスキームはWebViewに渡さない (ERR_UNKNOWN_URL_SCHEME 防止)
                             return !UrlPolicy.isAllowedSsoWebViewUrl(url)
+                        }
+
+                        override fun onPageStarted(
+                            view: WebView?,
+                            url: String?,
+                            favicon: android.graphics.Bitmap?,
+                        ) {
+                            if (handleTokenUrl(url)) view?.stopLoading()
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            error: WebResourceError?,
+                        ) {
+                            if (request?.isForMainFrame != true) return
+                            val url = request.url?.toString()
+                            if (handleTokenUrl(url)) return
+                            if (!tokenHandled) {
+                                loginError = "ログインページを読み込めませんでした。通信環境を確認して、もう一度お試しください。"
+                            }
                         }
                     }
                     loadUrl(SsoLogin.launchUrl(passport))
