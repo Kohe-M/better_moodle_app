@@ -396,7 +396,6 @@ private suspend fun resolveNativeRoute(
         is MoodleUrlTarget.Course -> courseRoute(target.courseId, title.ifBlank { "コース" }, null)
         is MoodleUrlTarget.ForumDiscussion -> forumDiscussionRoute(target.discussionId, title, url)
         is MoodleUrlTarget.Module -> {
-            if (target.modName !in setOf("assign", "quiz", "forum", "page")) return null
             val cm = runCatching {
                 container.moodleRepository.courseModule(target.cmid)
             }.getOrElse { error ->
@@ -445,7 +444,19 @@ private suspend fun resolveNativeRoute(
                     ),
                     routeTitle,
                 )
-                else -> null
+                else -> {
+                    val course = runCatching {
+                        container.moodleRepository.enrolledCourses()
+                    }.getOrElse { error ->
+                        if (error is CancellationException) throw error
+                        emptyList()
+                    }.firstOrNull { it.id == cm.course }
+                    courseRoute(
+                        cm.course,
+                        course?.displayName?.ifBlank { "コース" } ?: "コース",
+                        course?.courseCode,
+                    )
+                }
             }
         }
         null -> null
