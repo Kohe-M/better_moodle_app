@@ -68,6 +68,7 @@ fun FilePreviewScreen(
                     PreviewKind.Image -> loadImagePreview(container, fileUrl)
                     PreviewKind.Text -> loadTextPreview(container, fileUrl)
                     PreviewKind.Pdf -> FilePreviewState.Unsupported
+                    PreviewKind.Html -> FilePreviewState.Unsupported
                     PreviewKind.Unsupported -> FilePreviewState.Unsupported
                 }
             }.getOrElse {

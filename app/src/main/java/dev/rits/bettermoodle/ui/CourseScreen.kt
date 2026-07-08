@@ -1,5 +1,6 @@
 package dev.rits.bettermoodle.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.Assignment
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Link
@@ -29,6 +31,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -52,10 +55,14 @@ import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.CourseModule
 import dev.rits.bettermoodle.data.CourseSection
 import dev.rits.bettermoodle.data.ForumTarget
+import dev.rits.bettermoodle.data.ModuleContent
+import dev.rits.bettermoodle.data.PreviewKind
 import dev.rits.bettermoodle.data.QuizTarget
 import dev.rits.bettermoodle.data.UrlPolicy
+import dev.rits.bettermoodle.data.previewKindFor
 import dev.rits.bettermoodle.data.toForumTarget
 import dev.rits.bettermoodle.data.toQuizTarget
+import dev.rits.bettermoodle.data.urlContentFileUrl
 import kotlinx.coroutines.launch
 
 /**
@@ -76,6 +83,7 @@ fun CourseScreen(
     onOpenAssignment: (moduleId: Long, assignId: Long, title: String) -> Unit,
     onOpenForum: (target: ForumTarget, title: String) -> Unit,
     onOpenQuiz: (target: QuizTarget, title: String) -> Unit,
+    onOpenFilePreview: (fileUrl: String, title: String, kind: PreviewKind) -> Unit,
     onOpenMoodleWeb: (url: String, title: String) -> Unit,
     onOpenUrl: (url: String, title: String) -> Unit,
 ) {
@@ -83,6 +91,43 @@ fun CourseScreen(
     val scope = rememberCoroutineScope()
     val (state, refresh) = rememberLoadable("course:$courseId") { container.moodleRepository.courseContents(courseId) }
     var externalToConfirm by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var folderToShow by remember { mutableStateOf<CourseModule?>(null) }
+    var downloadToShare by remember { mutableStateOf<CourseDownloadFile?>(null) }
+
+    fun showCannotOpenLink() {
+        Toast.makeText(context, "このリンクは開けません", Toast.LENGTH_SHORT).show()
+    }
+
+    fun openContentFile(module: CourseModule, content: ModuleContent) {
+        val url = content.fileurl ?: return
+        val moduleTitle = module.name
+        val title = content.filename?.takeIf { it.isNotBlank() } ?: moduleTitle
+        when (val kind = previewKindFor(title, content.mimetype)) {
+            PreviewKind.Pdf -> onOpenPdf(url, title)
+            PreviewKind.Image,
+            PreviewKind.Text,
+            -> onOpenFilePreview(url, title, kind)
+            PreviewKind.Html -> {
+                val viewUrl = module.url?.takeIf { it.isNotBlank() }
+                if (viewUrl != null) {
+                    onOpenMoodleWeb(viewUrl, module.name)
+                } else {
+                    downloadToShare = CourseDownloadFile(
+                        fileUrl = url,
+                        filename = title,
+                        mimeType = content.mimetype,
+                    )
+                }
+            }
+            PreviewKind.Unsupported -> {
+                downloadToShare = CourseDownloadFile(
+                    fileUrl = url,
+                    filename = title,
+                    mimeType = content.mimetype,
+                )
+            }
+        }
+    }
 
     fun openModule(module: CourseModule) {
         when (module.modName) {
@@ -98,14 +143,34 @@ fun CourseScreen(
                 onOpenQuiz(module.toQuizTarget(courseId), module.name)
                 return
             }
+            "url" -> {
+                val url = urlContentFileUrl(module)
+                when {
+                    url == null -> showCannotOpenLink()
+                    UrlPolicy.isAllowedMoodleWebViewUrl(url) -> onOpenMoodleWeb(url, module.name)
+                    UrlPolicy.canOpenExternally(url) -> externalToConfirm = url to module.name
+                    else -> showCannotOpenLink()
+                }
+                return
+            }
         }
         scope.launch {
+            val files = module.downloadableFiles
+            if (module.modName == "folder" && files.isNotEmpty()) {
+                folderToShow = module
+                return@launch
+            }
             val pdf = module.pdfContent
             if (pdf?.fileurl != null) {
                 onOpenPdf(pdf.fileurl, module.name.ifBlank { pdf.filename ?: "PDF" })
                 return@launch
             }
-            val url = module.url ?: module.downloadableFiles.firstOrNull()?.fileurl
+            val file = files.firstOrNull()
+            if (file?.fileurl != null) {
+                openContentFile(module, file)
+                return@launch
+            }
+            val url = module.url
             if (url != null) {
                 when {
                     UrlPolicy.isAllowedMoodleWebViewUrl(url) -> onOpenMoodleWeb(url, module.name)
@@ -193,7 +258,94 @@ fun CourseScreen(
             },
         )
     }
+
+    folderToShow?.let { module ->
+        FolderFilesSheet(
+            module = module,
+            onDismiss = { folderToShow = null },
+            onOpenFile = { content ->
+                folderToShow = null
+                openContentFile(module, content)
+            },
+        )
+    }
+
+    downloadToShare?.let { file ->
+        DownloadShareDialog(
+            container = container,
+            fileUrl = file.fileUrl,
+            filename = file.filename,
+            mimeType = file.mimeType,
+            onDismiss = { downloadToShare = null },
+        )
+    }
 }
+
+private data class CourseDownloadFile(
+    val fileUrl: String,
+    val filename: String,
+    val mimeType: String?,
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FolderFilesSheet(
+    module: CourseModule,
+    onDismiss: () -> Unit,
+    onOpenFile: (ModuleContent) -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        LazyColumn(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                start = 16.dp,
+                top = 8.dp,
+                end = 16.dp,
+                bottom = 24.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item(key = "title") {
+                Text(module.name, style = MaterialTheme.typography.titleMedium)
+            }
+            module.downloadableFiles.forEach { content ->
+                item(key = content.fileurl ?: "${content.filename}-${content.filepath}") {
+                    Surface(
+                        onClick = { onOpenFile(content) },
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Description, contentDescription = null)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                val filename = content.filename ?: "ファイル"
+                                Text(filename, style = MaterialTheme.typography.bodyLarge, maxLines = 2)
+                                Text(
+                                    folderFileLabel(filename, content.mimetype),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun folderFileLabel(filename: String, mimeType: String?): String =
+    when (previewKindFor(filename, mimeType)) {
+        PreviewKind.Pdf -> "PDFプレビュー"
+        PreviewKind.Image -> "画像プレビュー"
+        PreviewKind.Text -> "テキストプレビュー"
+        PreviewKind.Html -> "HTMLをWebViewで表示"
+        PreviewKind.Unsupported -> "ダウンロードして開く"
+    }
 
 @Composable
 private fun SectionHeader(section: CourseSection) {

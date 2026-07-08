@@ -60,6 +60,11 @@ data class ModuleContent(
     val timemodified: Long = 0,
 )
 
+fun urlContentFileUrl(module: CourseModule): String? =
+    module.contents
+        .firstOrNull { it.type == "url" && !it.fileurl.isNullOrBlank() }
+        ?.fileurl
+
 /** tool_mobile_get_autologin_key の結果 */
 @Serializable
 data class AutologinKey(

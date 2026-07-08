@@ -155,6 +155,8 @@ class AssignmentUiModelsTest {
         assertEquals(PreviewKind.Pdf, previewKindFor("a.pdf", null))
         assertEquals(PreviewKind.Image, previewKindFor("a.bin", "image/png"))
         assertEquals(PreviewKind.Text, previewKindFor("notes.txt", null))
+        assertEquals(PreviewKind.Html, previewKindFor("index.html", null))
+        assertEquals(PreviewKind.Html, previewKindFor("page.bin", "text/html"))
         assertEquals(PreviewKind.Unsupported, previewKindFor("slides.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
     }
 }

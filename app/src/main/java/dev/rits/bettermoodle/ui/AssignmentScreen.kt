@@ -87,6 +87,7 @@ fun AssignmentScreen(
     var busy by remember { mutableStateOf(false) }
     var confirmSubmit by remember { mutableStateOf(false) }
     var acceptedStatement by remember { mutableStateOf(false) }
+    var downloadToShare by remember { mutableStateOf<SubmittedFileUi?>(null) }
 
     fun refresh() {
         refreshTick++
@@ -181,7 +182,11 @@ fun AssignmentScreen(
                     AssignmentSummaryCard(assignment, ui)
                     FeedbackBlock(s.data.status, onOpenUrl)
                     SubmittedTextSection(ui, onOpenUrl)
-                    SubmittedFilesSection(ui.files, onOpenFilePreview)
+                    SubmittedFilesSection(
+                        files = ui.files,
+                        onOpenFilePreview = onOpenFilePreview,
+                        onDownloadFile = { downloadToShare = it },
+                    )
 
                     if (assignment.supports("onlinetext") && AssignmentAction.Edit in ui.actions) {
                         OutlinedTextField(
@@ -292,6 +297,21 @@ fun AssignmentScreen(
             },
         )
     }
+
+    downloadToShare?.let { file ->
+        val url = file.sourceUrl
+        if (!url.isNullOrBlank()) {
+            DownloadShareDialog(
+                container = container,
+                fileUrl = url,
+                filename = file.filename,
+                mimeType = file.mimeType,
+                onDismiss = { downloadToShare = null },
+            )
+        } else {
+            downloadToShare = null
+        }
+    }
 }
 
 @Composable
@@ -351,7 +371,11 @@ private fun SubmittedTextSection(ui: AssignmentUiModel, onOpenUrl: (String, Stri
 }
 
 @Composable
-private fun SubmittedFilesSection(files: List<SubmittedFileUi>, onOpenFilePreview: (SubmittedFileUi) -> Unit) {
+private fun SubmittedFilesSection(
+    files: List<SubmittedFileUi>,
+    onOpenFilePreview: (SubmittedFileUi) -> Unit,
+    onDownloadFile: (SubmittedFileUi) -> Unit,
+) {
     Text("提出したファイル", style = MaterialTheme.typography.titleMedium)
     if (files.isEmpty()) {
         Text("ファイル提出はありません", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -372,9 +396,15 @@ private fun SubmittedFilesSection(files: List<SubmittedFileUi>, onOpenFilePrevie
                     Text("サイズ: ${formatBytes(file.sizeBytes)}")
                     Text("更新日時: ${formatAssignmentTime(file.modifiedAt)}")
                     Text("プレビュー: ${previewLabel(file.previewKind)}")
-                    if (file.previewKind != PreviewKind.Unsupported && !file.sourceUrl.isNullOrBlank()) {
+                    val hasSource = !file.sourceUrl.isNullOrBlank()
+                    if (file.previewKind != PreviewKind.Unsupported && file.previewKind != PreviewKind.Html && hasSource) {
                         OutlinedButton(onClick = { onOpenFilePreview(file) }) {
                             Text("プレビュー")
+                        }
+                    }
+                    if ((file.previewKind == PreviewKind.Unsupported || file.previewKind == PreviewKind.Html) && hasSource) {
+                        OutlinedButton(onClick = { onDownloadFile(file) }) {
+                            Text("ダウンロードして開く")
                         }
                     }
                 }
@@ -416,6 +446,7 @@ private fun previewLabel(kind: PreviewKind): String =
         PreviewKind.Pdf -> "PDFを表示できます"
         PreviewKind.Image -> "画像を表示できます"
         PreviewKind.Text -> "テキストを表示できます"
+        PreviewKind.Html -> "この形式はアプリ内プレビューに未対応です"
         PreviewKind.Unsupported -> "この形式はアプリ内プレビューに未対応です"
     }
 

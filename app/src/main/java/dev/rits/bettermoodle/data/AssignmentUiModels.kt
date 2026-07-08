@@ -36,6 +36,7 @@ enum class PreviewKind {
     Pdf,
     Image,
     Text,
+    Html,
     Unsupported,
 }
 
@@ -159,6 +160,7 @@ fun previewKindFor(filename: String, mimeType: String?): PreviewKind {
     return when {
         mimeType == "application/pdf" || lower.endsWith(".pdf") -> PreviewKind.Pdf
         mimeType.orEmpty().startsWith("image/") -> PreviewKind.Image
+        mimeType == "text/html" || lower.endsWith(".html") || lower.endsWith(".htm") -> PreviewKind.Html
         mimeType.orEmpty().startsWith("text/") ||
             lower.endsWith(".txt") ||
             lower.endsWith(".csv") ||

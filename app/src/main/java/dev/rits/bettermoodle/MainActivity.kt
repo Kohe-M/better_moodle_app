@@ -154,6 +154,13 @@ private fun Root(container: AppContainer) {
                         quizRoute(target, title),
                     )
                 },
+                onOpenFilePreview = { url, title, kind ->
+                    rootNav.navigate(
+                        "filePreview?url=${Uri.encode(url)}" +
+                            "&title=${Uri.encode(title)}" +
+                            "&kind=${Uri.encode(kind.name)}",
+                    )
+                },
                 onOpenMoodleWeb = { url, title ->
                     rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
                 },
@@ -194,6 +201,7 @@ private fun Root(container: AppContainer) {
                                 "&title=${Uri.encode(file.filename)}" +
                                 "&kind=${Uri.encode(file.previewKind.name)}",
                         )
+                        PreviewKind.Html,
                         PreviewKind.Unsupported -> Unit
                     }
                 },

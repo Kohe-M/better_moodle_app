@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.rits.bettermoodle.BuildConfig
@@ -45,9 +47,10 @@ fun MoodleWebScreen(
     title: String,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
     var webView by remember { mutableStateOf<WebView?>(null) }
     var loading by remember { mutableStateOf(true) }
-    var blockedNotice by remember { mutableStateOf<String?>(null) }
+    var blockedNotice by remember { mutableStateOf<BlockedNotice?>(null) }
 
     BackHandler {
         val view = webView
@@ -75,7 +78,11 @@ fun MoodleWebScreen(
 
         Column(Modifier.fillMaxSize().padding(padding)) {
             blockedNotice?.let { notice ->
-                BlockedNoticeBanner(notice) { blockedNotice = null }
+                BlockedNoticeBanner(
+                    notice = notice,
+                    onOpenExternal = { openInCustomTab(context, it) },
+                    onDismiss = { blockedNotice = null },
+                )
             }
             Box(Modifier.fillMaxSize()) {
                 AndroidView(
@@ -100,7 +107,7 @@ fun MoodleWebScreen(
                                     }
                                     // ログインリダイレクト (Moodle→SSO) を通すため、SSO許可リストで判定する。
                                     if (UrlPolicy.isAllowedSsoWebViewUrl(target)) return false
-                                    blockedNotice = "Moodle外への遷移をブロックしました: ${safeUrlLabel(target)}"
+                                    blockedNotice = BlockedNotice.BlockedUrl(target)
                                     return true
                                 }
 
@@ -110,7 +117,7 @@ fun MoodleWebScreen(
                                 }
                             }
                             setDownloadListener { _, _, _, _, _ ->
-                                blockedNotice = "このファイルはダウンロードできません"
+                                blockedNotice = BlockedNotice.Message("このファイルはダウンロードできません")
                             }
                             loadUrl(url)
                             webView = this
@@ -124,7 +131,13 @@ fun MoodleWebScreen(
 }
 
 @Composable
-private fun BlockedNoticeBanner(notice: String, onDismiss: () -> Unit) {
+private fun BlockedNoticeBanner(
+    notice: BlockedNotice,
+    onOpenExternal: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val blockedUrl = (notice as? BlockedNotice.BlockedUrl)?.url
+    val externalUrl = blockedUrl?.takeIf(UrlPolicy::canOpenExternally)
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -132,15 +145,30 @@ private fun BlockedNoticeBanner(notice: String, onDismiss: () -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                notice,
+                notice.message,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f).padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
             )
+            if (externalUrl != null) {
+                TextButton(onClick = { onOpenExternal(externalUrl) }) {
+                    Text("外部ブラウザで開く")
+                }
+            }
             IconButton(onClick = onDismiss) {
                 Icon(Icons.Filled.Close, contentDescription = "閉じる")
             }
         }
     }
+}
+
+private sealed interface BlockedNotice {
+    val message: String
+
+    data class BlockedUrl(val url: String) : BlockedNotice {
+        override val message: String = "Moodle外への遷移をブロックしました: ${safeUrlLabel(url)}"
+    }
+
+    data class Message(override val message: String) : BlockedNotice
 }
 
 /** ユーザー表示用: スキームとホストのみ。カスタムスキームはauthorityに秘密情報が入り得るためスキームのみ。 */
