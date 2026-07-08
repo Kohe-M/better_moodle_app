@@ -26,6 +26,15 @@ class UrlPolicyTest {
     }
 
     @Test
+    fun `token append preserves already encoded pluginfile path`() {
+        val url = "https://lms.ritsumei.ac.jp/pluginfile.php/123/mod_resource/content/1/%E8%AC%9B%E7%BE%A9.pdf?forcedownload=1"
+        val authed = UrlPolicy.appendMoodleToken(url, "secret token")!!
+        assertEquals("$url&token=secret+token", authed)
+        assertFalse("%25" in authed)
+        assertTrue("/content/1/%E8%AC%9B%E7%BE%A9.pdf?forcedownload=1&token=" in authed)
+    }
+
+    @Test
     fun `rejects pluginfile URLs that already carry sensitive parameters`() {
         val url = "https://lms.ritsumei.ac.jp/pluginfile.php/123/a.pdf?forcedownload=1&token=old"
         assertNull(UrlPolicy.appendMoodleToken(url, "new"))

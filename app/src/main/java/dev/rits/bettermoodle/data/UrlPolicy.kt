@@ -78,18 +78,14 @@ object UrlPolicy {
     }
 
     fun appendMoodleToken(url: String, token: String): String? {
-        if (!isSafeMoodlePluginFileSourceUrl(url)) return null
-        val uri = parse(url) ?: return null
+        val source = url.trim()
+        if (!isSafeMoodlePluginFileSourceUrl(source)) return null
+        val uri = parse(source) ?: return null
+        if (uri.rawFragment != null) return null
         val query = uri.rawQuery
         val tokenParam = "token=${URLEncoder.encode(token, Charsets.UTF_8.name())}"
-        val newQuery = listOfNotNull(query?.takeIf { it.isNotBlank() }, tokenParam).joinToString("&")
-        return URI(
-            uri.scheme,
-            uri.rawAuthority,
-            uri.rawPath,
-            newQuery,
-            uri.rawFragment,
-        ).toASCIIString()
+        val separator = if (query.isNullOrBlank()) "?" else "&"
+        return source + separator + tokenParam
     }
 
     private fun parse(url: String): URI? =
