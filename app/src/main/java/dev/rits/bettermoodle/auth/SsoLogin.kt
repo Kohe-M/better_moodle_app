@@ -57,7 +57,16 @@ object SsoLogin {
             .apply { if (!cookieHeader.isNullOrBlank()) header("Cookie", cookieHeader) }
             .build()
         probeHttp.newCall(request).execute().use { resp ->
-            tokensFromLocationHeader(resp.header("Location"), passport)
+            val location = resp.header("Location")
+            val tokens = tokensFromLocationHeader(location, passport)
+            if (dev.rits.bettermoodle.BuildConfig.DEBUG) {
+                android.util.Log.d(
+                    "SsoLogin",
+                    "probe http=${resp.code} hasCookie=${!cookieHeader.isNullOrBlank()} " +
+                        "schemeLocation=${location != null && isTokenSchemeUrl(location)} tokens=${tokens != null}",
+                )
+            }
+            tokens
         }
     }.getOrNull()
 

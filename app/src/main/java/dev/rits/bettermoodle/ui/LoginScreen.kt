@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +36,7 @@ import dev.rits.bettermoodle.auth.SsoLogin
 import dev.rits.bettermoodle.data.MoodleClient
 import dev.rits.bettermoodle.data.UrlPolicy
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -93,6 +95,19 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                 }
             }
             return
+        }
+        // WebViewはカスタムスキームへの302を「どのコールバックも呼ばずに」破棄することが
+        // あり (KMSI後のPOSTリダイレクト連鎖など)、その場合ページイベントが一切来ない。
+        // SSO中は定期的に launch.php を直叩きし、セッション成立を検出してトークンを回収する。
+        LaunchedEffect(Unit) {
+            while (!tokenDelivered && loginError == null) {
+                val tokens = probeLaunchToken()
+                if (tokens != null) {
+                    deliverTokens(tokens)
+                    break
+                }
+                delay(1500)
+            }
         }
         AndroidView(
             modifier = Modifier.fillMaxSize(),
