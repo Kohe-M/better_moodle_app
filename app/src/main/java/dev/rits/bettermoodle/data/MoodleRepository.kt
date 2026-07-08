@@ -99,6 +99,18 @@ class MoodleRepository(
         )
     }
 
+    suspend fun pages(courseId: Long): List<MoodlePage> {
+        require(courseId > 0L) { "Invalid course ID" }
+        val resp: PagesResponse = client.callAs(
+            "mod_page_get_pages_by_courses",
+            pagesByCoursesParams(courseId),
+        )
+        return resp.pages
+    }
+
+    suspend fun page(courseId: Long, courseModuleId: Long): MoodlePage? =
+        pages(courseId).firstOrNull { it.coursemodule == courseModuleId }
+
     suspend fun startAssignmentSubmission(assignId: Long) {
         client.call("mod_assign_start_submission", mapOf("assignid" to assignId.toString()))
     }
@@ -222,6 +234,9 @@ class MoodleRepository(
 
         fun quizAccessInformationParams(quizId: Long): Map<String, String> =
             mapOf("quizid" to quizId.toString())
+
+        fun pagesByCoursesParams(courseId: Long): Map<String, String> =
+            mapOf("courseids[0]" to courseId.toString())
 
         private val DAY_CHARS = listOf("月", "火", "水", "木", "金", "土", "日")
 

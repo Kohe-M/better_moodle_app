@@ -46,6 +46,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.rits.bettermoodle.auth.SsoLogin
 import dev.rits.bettermoodle.data.ForumTarget
+import dev.rits.bettermoodle.data.PageTarget
 import dev.rits.bettermoodle.data.PreviewKind
 import dev.rits.bettermoodle.data.QuizTarget
 import dev.rits.bettermoodle.data.UrlPolicy
@@ -58,6 +59,7 @@ import dev.rits.bettermoodle.ui.ForumScreen
 import dev.rits.bettermoodle.ui.LoginScreen
 import dev.rits.bettermoodle.ui.MoodleWebScreen
 import dev.rits.bettermoodle.ui.NotificationsScreen
+import dev.rits.bettermoodle.ui.PageScreen
 import dev.rits.bettermoodle.ui.PdfPreviewScreen
 import dev.rits.bettermoodle.ui.PortalScreen
 import dev.rits.bettermoodle.ui.QuizScreen
@@ -152,6 +154,11 @@ private fun Root(container: AppContainer) {
                 onOpenQuiz = { target, title ->
                     rootNav.navigate(
                         quizRoute(target, title),
+                    )
+                },
+                onOpenPage = { target, title ->
+                    rootNav.navigate(
+                        pageRoute(target, title),
                     )
                 },
                 onOpenFilePreview = { url, title, kind ->
@@ -269,6 +276,39 @@ private fun Root(container: AppContainer) {
             )
         }
 
+        composable("page?courseId={courseId}&courseModuleId={courseModuleId}&contextId={contextId}&modName={modName}&title={title}&url={url}") { entry ->
+            val target = PageTarget(
+                courseId = entry.arguments?.getString("courseId")?.toLongOrNull() ?: 0L,
+                courseModuleId = entry.arguments?.getString("courseModuleId")?.toLongOrNull() ?: 0L,
+                contextId = entry.arguments?.getString("contextId")?.toLongOrNull()?.takeIf { it > 0L },
+                modName = entry.arguments?.getString("modName").orEmpty(),
+                url = entry.arguments?.getString("url")?.takeIf { it.isNotBlank() },
+            )
+            PageScreen(
+                container = container,
+                target = target,
+                title = entry.arguments?.getString("title") ?: "ページ",
+                onBack = { rootNav.popBackStack() },
+                onFallbackWeb = {
+                    val url = target.url
+                    if (!url.isNullOrBlank()) {
+                        rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("ページ")}")
+                    }
+                },
+                onOpenPdf = { url, title ->
+                    rootNav.navigate("pdf?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
+                },
+                onOpenFilePreview = { url, title, kind ->
+                    rootNav.navigate(
+                        "filePreview?url=${Uri.encode(url)}" +
+                            "&title=${Uri.encode(title)}" +
+                            "&kind=${Uri.encode(kind.name)}",
+                    )
+                },
+                onOpenUrl = ::openUrl,
+            )
+        }
+
         composable("moodleWeb?url={url}&title={title}") { entry ->
             MoodleWebScreen(
                 url = entry.arguments?.getString("url").orEmpty(),
@@ -308,6 +348,14 @@ private fun quizRoute(target: QuizTarget, title: String): String =
     "quiz?courseId=${target.courseId}" +
         "&courseModuleId=${target.courseModuleId}" +
         "&quizInstanceId=${target.quizInstanceId}" +
+        "&contextId=${target.contextId ?: 0L}" +
+        "&modName=${Uri.encode(target.modName)}" +
+        "&title=${Uri.encode(title)}" +
+        "&url=${Uri.encode(target.url.orEmpty())}"
+
+private fun pageRoute(target: PageTarget, title: String): String =
+    "page?courseId=${target.courseId}" +
+        "&courseModuleId=${target.courseModuleId}" +
         "&contextId=${target.contextId ?: 0L}" +
         "&modName=${Uri.encode(target.modName)}" +
         "&title=${Uri.encode(title)}" +

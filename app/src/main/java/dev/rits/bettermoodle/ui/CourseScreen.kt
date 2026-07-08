@@ -56,11 +56,13 @@ import dev.rits.bettermoodle.data.CourseModule
 import dev.rits.bettermoodle.data.CourseSection
 import dev.rits.bettermoodle.data.ForumTarget
 import dev.rits.bettermoodle.data.ModuleContent
+import dev.rits.bettermoodle.data.PageTarget
 import dev.rits.bettermoodle.data.PreviewKind
 import dev.rits.bettermoodle.data.QuizTarget
 import dev.rits.bettermoodle.data.UrlPolicy
 import dev.rits.bettermoodle.data.previewKindFor
 import dev.rits.bettermoodle.data.toForumTarget
+import dev.rits.bettermoodle.data.toPageTarget
 import dev.rits.bettermoodle.data.toQuizTarget
 import dev.rits.bettermoodle.data.urlContentFileUrl
 import kotlinx.coroutines.launch
@@ -83,6 +85,7 @@ fun CourseScreen(
     onOpenAssignment: (moduleId: Long, assignId: Long, title: String) -> Unit,
     onOpenForum: (target: ForumTarget, title: String) -> Unit,
     onOpenQuiz: (target: QuizTarget, title: String) -> Unit,
+    onOpenPage: (target: PageTarget, title: String) -> Unit,
     onOpenFilePreview: (fileUrl: String, title: String, kind: PreviewKind) -> Unit,
     onOpenMoodleWeb: (url: String, title: String) -> Unit,
     onOpenUrl: (url: String, title: String) -> Unit,
@@ -141,6 +144,10 @@ fun CourseScreen(
             }
             "quiz" -> {
                 onOpenQuiz(module.toQuizTarget(courseId), module.name)
+                return
+            }
+            "page" -> {
+                onOpenPage(module.toPageTarget(courseId), module.name)
                 return
             }
             "url" -> {

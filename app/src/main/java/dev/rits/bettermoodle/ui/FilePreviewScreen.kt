@@ -173,7 +173,7 @@ private fun loadTextPreview(container: AppContainer, fileUrl: String): FilePrevi
     return FilePreviewState.TextReady(text)
 }
 
-private fun downloadPreviewBytes(
+internal fun downloadPreviewBytes(
     container: AppContainer,
     fileUrl: String,
     maxBytes: Long,
@@ -212,7 +212,7 @@ private fun downloadPreviewBytes(
     }
 }
 
-private fun calculateSampleSize(width: Int, height: Int): Int {
+internal fun calculateSampleSize(width: Int, height: Int): Int {
     var sample = 1
     while ((width / sample).toLong() * (height / sample).toLong() > MAX_IMAGE_PIXELS) {
         sample *= 2
