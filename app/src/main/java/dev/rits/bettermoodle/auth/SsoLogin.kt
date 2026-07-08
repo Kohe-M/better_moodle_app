@@ -14,13 +14,14 @@ import java.util.Base64
  *    {scheme}://token=BASE64("md5sig:::wstoken[:::privatetoken]") にリダイレクトされる
  * 3. md5sig == md5(siteUrl + passport) を検証してトークンを取り出す
  *
- * Callback scheme is fixed to the app-owned bettermoodle scheme declared in AndroidManifest.
+ * Accept the app-owned bettermoodle scheme and the site's forced moodlemobile scheme.
  */
 object SsoLogin {
 
     data class Tokens(val wsToken: String, val privateToken: String?)
 
     private val TOKEN_URL_REGEX = Regex("^([a-zA-Z][a-zA-Z0-9+.-]*)://token=(.+)$")
+    private val ACCEPTED_SCHEMES = setOf(MoodleClient.URL_SCHEME, "moodlemobile")
     private val secureRandom = SecureRandom()
 
     fun newPassport(): String {
@@ -32,9 +33,11 @@ object SsoLogin {
     fun launchUrl(passport: String): String =
         "${MoodleClient.LAUNCH_URL}?service=moodle_mobile_app&passport=$passport&urlscheme=${MoodleClient.URL_SCHEME}"
 
-    /** アプリのコールバックスキーム (bettermoodle://) へのリダイレクトかどうか */
+    /** 受理対象のトークンスキームへのリダイレクトかどうか */
     fun isTokenSchemeUrl(url: String): Boolean =
-        url.trim().startsWith("${MoodleClient.URL_SCHEME}://", ignoreCase = true)
+        ACCEPTED_SCHEMES.any { scheme ->
+            url.trim().startsWith("$scheme://", ignoreCase = true)
+        }
 
     private val probeHttp by lazy {
         okhttp3.OkHttpClient.Builder()
@@ -93,7 +96,7 @@ object SsoLogin {
      */
     fun parseTokenUrl(url: String, passport: String): Tokens? {
         val match = TOKEN_URL_REGEX.find(url.trim()) ?: return null
-        if (match.groupValues[1] != MoodleClient.URL_SCHEME) return null
+        if (match.groupValues[1].lowercase() !in ACCEPTED_SCHEMES) return null
         val encoded = runCatching {
             URLDecoder.decode(match.groupValues[2], Charsets.UTF_8.name())
         }.getOrNull() ?: return null

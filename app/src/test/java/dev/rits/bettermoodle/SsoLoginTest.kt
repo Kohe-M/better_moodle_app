@@ -33,9 +33,16 @@ class SsoLoginTest {
     }
 
     @Test
-    fun `rejects moodlemobile callback`() {
+    fun `accepts moodlemobile callback`() {
         val payload = encode("$signature:::aabbccddeeff00112233")
-        assertNull(SsoLogin.parseTokenUrl("moodlemobile://token=$payload", passport))
+        val tokens = SsoLogin.parseTokenUrl("moodlemobile://token=$payload", passport)!!
+        assertEquals("aabbccddeeff00112233", tokens.wsToken)
+    }
+
+    @Test
+    fun `rejects unknown scheme callback`() {
+        val payload = encode("$signature:::aabbccddeeff00112233")
+        assertNull(SsoLogin.parseTokenUrl("evilapp://token=$payload", passport))
     }
 
     @Test
@@ -63,7 +70,7 @@ class SsoLoginTest {
     fun `token scheme URL detection`() {
         assertTrue(SsoLogin.isTokenSchemeUrl("bettermoodle://token=abc"))
         assertTrue(SsoLogin.isTokenSchemeUrl(" BetterMoodle://token=abc "))
-        assertFalse(SsoLogin.isTokenSchemeUrl("moodlemobile://token=abc"))
+        assertTrue(SsoLogin.isTokenSchemeUrl("moodlemobile://token=abc"))
         assertFalse(SsoLogin.isTokenSchemeUrl("https://lms.ritsumei.ac.jp/my/"))
     }
 
@@ -72,9 +79,10 @@ class SsoLoginTest {
         val payload = encode("$signature:::aabbccddeeff00112233:::priv")
         val tokens = SsoLogin.tokensFromLocationHeader("bettermoodle://token=$payload", passport)!!
         assertEquals("aabbccddeeff00112233", tokens.wsToken)
+        val moodleMobileTokens = SsoLogin.tokensFromLocationHeader("moodlemobile://token=$payload", passport)!!
+        assertEquals("aabbccddeeff00112233", moodleMobileTokens.wsToken)
         assertNull(SsoLogin.tokensFromLocationHeader(null, passport))
         assertNull(SsoLogin.tokensFromLocationHeader("https://lms.ritsumei.ac.jp/login/index.php", passport))
-        assertNull(SsoLogin.tokensFromLocationHeader("moodlemobile://token=$payload", passport))
     }
 
     @Test
