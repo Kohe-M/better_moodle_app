@@ -152,6 +152,23 @@ fun timetableCellsConnected(above: List<TimetableEntry>, below: List<TimetableEn
     return belowEntry.courseCode == null && courseUrl != null && courseUrl == belowEntry.courseUrl
 }
 
+/** (dayIdx, period) のセルが属する連結ランの先頭時限を返す */
+fun timetableRunStartPeriod(
+    byCell: Map<Pair<Int, Int>, List<TimetableEntry>>,
+    dayIdx: Int,
+    period: Int,
+): Int {
+    var start = period
+    while (timetableCellsConnected(
+            byCell[dayIdx to (start - 1)].orEmpty(),
+            byCell[dayIdx to start].orEmpty(),
+        )
+    ) {
+        start--
+    }
+    return start
+}
+
 data class Timetable(
     val entries: List<TimetableEntry>,
     val dayLabels: List<String>,

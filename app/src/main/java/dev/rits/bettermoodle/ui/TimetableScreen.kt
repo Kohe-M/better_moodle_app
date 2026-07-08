@@ -1,7 +1,9 @@
 package dev.rits.bettermoodle.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +35,7 @@ import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.Timetable
 import dev.rits.bettermoodle.data.TimetableEntry
 import dev.rits.bettermoodle.data.timetableCellsConnected
+import dev.rits.bettermoodle.data.timetableRunStartPeriod
 import java.time.LocalDate
 
 /**
@@ -71,6 +74,9 @@ private fun TimetableGrid(
     val todayIndex = LocalDate.now().dayOfWeek.value - 1 // 0=月
 
     val byCell = timetable.entries.groupBy { it.dayIndex to it.period }
+    val cellInteractionSources = remember(timetable) {
+        mutableMapOf<Pair<Int, Int>, MutableInteractionSource>()
+    }
 
     Column(
         modifier = Modifier
@@ -98,11 +104,16 @@ private fun TimetableGrid(
                         entries,
                         byCell[dayIdx to (period + 1)].orEmpty(),
                     )
+                    val runStart = timetableRunStartPeriod(byCell, dayIdx, period)
+                    val interactionSource = cellInteractionSources.getOrPut(dayIdx to runStart) {
+                        MutableInteractionSource()
+                    }
                     SubjectCell(
                         entries = entries,
                         highlight = dayIdx == todayIndex,
                         connectedAbove = connectedAbove,
                         connectedBelow = connectedBelow,
+                        interactionSource = interactionSource,
                         modifier = Modifier.weight(1f),
                         onClick = { entry ->
                             val id = entry.courseId
@@ -167,6 +178,7 @@ private fun SubjectCell(
     highlight: Boolean,
     connectedAbove: Boolean,
     connectedBelow: Boolean,
+    interactionSource: MutableInteractionSource,
     modifier: Modifier,
     onClick: (TimetableEntry) -> Unit,
 ) {
@@ -196,7 +208,11 @@ private fun SubjectCell(
                     else -> MaterialTheme.colorScheme.secondaryContainer
                 },
             )
-            .clickable(enabled = entry != null) {
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                enabled = entry != null,
+            ) {
                 when {
                     entries.size >= 2 -> showCoursePicker = true
                     entry != null -> onClick(entry)

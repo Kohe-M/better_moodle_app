@@ -2,6 +2,8 @@ package dev.rits.bettermoodle
 
 import dev.rits.bettermoodle.data.TimetableEntry
 import dev.rits.bettermoodle.data.timetableCellsConnected
+import dev.rits.bettermoodle.data.timetableRunStartPeriod
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -61,6 +63,40 @@ class TimetableCellConnectionTest {
                 listOf(entry(period = 4, courseCode = "12345")),
             ),
         )
+    }
+
+    @Test
+    fun `run start period returns own period for single cell`() {
+        val byCell = byCell(
+            entry(period = 2, courseCode = "12345"),
+        )
+
+        assertEquals(2, timetableRunStartPeriod(byCell, dayIdx = 0, period = 2))
+    }
+
+    @Test
+    fun `run start period returns first period for second cell in two cell run`() {
+        val byCell = byCell(
+            entry(period = 1, courseCode = "12345"),
+            entry(period = 2, courseCode = "12345"),
+        )
+
+        assertEquals(1, timetableRunStartPeriod(byCell, dayIdx = 0, period = 2))
+    }
+
+    @Test
+    fun `run start period returns first period for third cell in three cell run`() {
+        val byCell = byCell(
+            entry(period = 1, courseCode = "12345"),
+            entry(period = 2, courseCode = "12345"),
+            entry(period = 3, courseCode = "12345"),
+        )
+
+        assertEquals(1, timetableRunStartPeriod(byCell, dayIdx = 0, period = 3))
+    }
+
+    private fun byCell(vararg entries: TimetableEntry) = entries.toList().groupBy {
+        it.dayIndex to it.period
     }
 
     private fun entry(
