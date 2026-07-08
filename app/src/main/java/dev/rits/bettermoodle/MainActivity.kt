@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -91,6 +92,17 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * ユーザー操作起点のナビゲーション。遷移アニメーション中 (現在のエントリが
+ * RESUMED でない間) はタップが出ていく画面に落ちるため、その間の navigate を無視する。
+ * 二重タップによる同一画面の多重プッシュもこれで防ぐ。
+ */
+private fun NavHostController.navigateFromUser(route: String) {
+    if (currentBackStackEntry?.lifecycle?.currentState == Lifecycle.State.RESUMED) {
+        navigate(route)
+    }
+}
+
 @Composable
 private fun Root(container: AppContainer) {
     val token by container.sessionStore.tokenFlow.collectAsState(initial = "INIT")
@@ -113,7 +125,7 @@ private fun Root(container: AppContainer) {
     fun openUrl(url: String, title: String) {
         when {
             UrlPolicy.isAllowedMoodleWebViewUrl(url) ->
-                rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
+                rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
             UrlPolicy.canOpenExternally(url) -> openInCustomTab(context, url)
         }
     }
@@ -126,7 +138,7 @@ private fun Root(container: AppContainer) {
                 container = container,
                 onBack = { rootNav.popBackStack() },
                 onOpenCourse = { id, name, code ->
-                    rootNav.navigate(courseRoute(id, name, code))
+                    rootNav.navigateFromUser(courseRoute(id, name, code))
                 },
             )
         }
@@ -142,37 +154,37 @@ private fun Root(container: AppContainer) {
                 courseCode = code,
                 onBack = { rootNav.popBackStack() },
                 onOpenPdf = { url, title ->
-                    rootNav.navigate("pdf?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
+                    rootNav.navigateFromUser("pdf?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
                 },
                 onOpenAssignment = { moduleId, assignId, title ->
-                    rootNav.navigate(
+                    rootNav.navigateFromUser(
                         "assignment/$id/$moduleId/$assignId?title=${Uri.encode(title)}",
                     )
                 },
                 onOpenForum = { target, title ->
-                    rootNav.navigate(
+                    rootNav.navigateFromUser(
                         forumRoute(target, title),
                     )
                 },
                 onOpenQuiz = { target, title ->
-                    rootNav.navigate(
+                    rootNav.navigateFromUser(
                         quizRoute(target, title),
                     )
                 },
                 onOpenPage = { target, title ->
-                    rootNav.navigate(
+                    rootNav.navigateFromUser(
                         pageRoute(target, title),
                     )
                 },
                 onOpenFilePreview = { url, title, kind ->
-                    rootNav.navigate(
+                    rootNav.navigateFromUser(
                         "filePreview?url=${Uri.encode(url)}" +
                             "&title=${Uri.encode(title)}" +
                             "&kind=${Uri.encode(kind.name)}",
                     )
                 },
                 onOpenMoodleWeb = { url, title ->
-                    rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
+                    rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
                 },
                 onOpenUrl = ::openUrl,
             )
@@ -201,12 +213,12 @@ private fun Root(container: AppContainer) {
                 onOpenFilePreview = { file ->
                     val url = file.sourceUrl ?: return@AssignmentScreen
                     when (file.previewKind) {
-                        PreviewKind.Pdf -> rootNav.navigate(
+                        PreviewKind.Pdf -> rootNav.navigateFromUser(
                             "pdf?url=${Uri.encode(url)}&title=${Uri.encode(file.filename)}",
                         )
                         PreviewKind.Image,
                         PreviewKind.Text,
-                        -> rootNav.navigate(
+                        -> rootNav.navigateFromUser(
                             "filePreview?url=${Uri.encode(url)}" +
                                 "&title=${Uri.encode(file.filename)}" +
                                 "&kind=${Uri.encode(file.previewKind.name)}",
@@ -249,7 +261,7 @@ private fun Root(container: AppContainer) {
                 onFallbackWeb = {
                     val url = target.url
                     if (!url.isNullOrBlank()) {
-                        rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("フォーラム")}")
+                        rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("フォーラム")}")
                     }
                 },
             )
@@ -273,7 +285,7 @@ private fun Root(container: AppContainer) {
                 onFallbackWeb = {
                     val url = target.url
                     if (!url.isNullOrBlank()) {
-                        rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("小テスト")}")
+                        rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("小テスト")}")
                     }
                 },
             )
@@ -295,14 +307,14 @@ private fun Root(container: AppContainer) {
                 onFallbackWeb = {
                     val url = target.url
                     if (!url.isNullOrBlank()) {
-                        rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("ページ")}")
+                        rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("ページ")}")
                     }
                 },
                 onOpenPdf = { url, title ->
-                    rootNav.navigate("pdf?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
+                    rootNav.navigateFromUser("pdf?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
                 },
                 onOpenFilePreview = { url, title, kind ->
-                    rootNav.navigate(
+                    rootNav.navigateFromUser(
                         "filePreview?url=${Uri.encode(url)}" +
                             "&title=${Uri.encode(title)}" +
                             "&kind=${Uri.encode(kind.name)}",
@@ -386,13 +398,13 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
     val currentRoute = backStack?.destination?.route
 
     fun openCourse(id: Long, name: String, code: String?) {
-        rootNav.navigate(courseRoute(id, name, code))
+        rootNav.navigateFromUser(courseRoute(id, name, code))
     }
 
     fun openUrl(url: String, title: String) {
         when {
             UrlPolicy.isAllowedMoodleWebViewUrl(url) ->
-                rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
+                rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
             UrlPolicy.canOpenExternally(url) -> openInCustomTab(context, url)
         }
     }
@@ -408,7 +420,7 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
                 },
                 actions = {
                     if (currentRoute == "timetable") {
-                        IconButton(onClick = { rootNav.navigate("courses") }) {
+                        IconButton(onClick = { rootNav.navigateFromUser("courses") }) {
                             Icon(Icons.AutoMirrored.Filled.List, contentDescription = "すべてのコース")
                         }
                     }
@@ -463,12 +475,12 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
                     container = container,
                     onOpenUrl = ::openUrl,
                     onOpenAssignment = { courseId, moduleId, assignId, title ->
-                        rootNav.navigate(
+                        rootNav.navigateFromUser(
                             "assignment/$courseId/$moduleId/$assignId?title=${Uri.encode(title)}",
                         )
                     },
                     onOpenQuiz = { target, title ->
-                        rootNav.navigate(quizRoute(target, title))
+                        rootNav.navigateFromUser(quizRoute(target, title))
                     },
                 )
             }
