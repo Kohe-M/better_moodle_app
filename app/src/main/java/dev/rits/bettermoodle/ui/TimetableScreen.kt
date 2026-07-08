@@ -37,7 +37,7 @@ fun TimetableScreen(
     container: AppContainer,
     onOpenCourse: (courseId: Long, courseName: String, courseCode: String?) -> Unit,
 ) {
-    val (state, refresh) = rememberLoadable { container.moodleRepository.timetable() }
+    val (state, refresh) = rememberLoadable("timetable") { container.moodleRepository.timetable() }
 
     when (val s = state) {
         is UiState.Loading -> LoadingBox()

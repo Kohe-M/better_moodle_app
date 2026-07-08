@@ -12,8 +12,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +33,7 @@ import java.time.format.DateTimeFormatter
  * 課題締切だけを集めた画面。「通知がごちゃまぜ」問題への回答。
  * core_calendar_get_action_events_by_timesort を assign/quiz 等に絞って表示。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeadlinesScreen(
     container: AppContainer,
@@ -38,43 +41,49 @@ fun DeadlinesScreen(
     onOpenAssignment: (courseId: Long, moduleId: Long, assignId: Long, title: String) -> Unit = { _, _, _, _ -> },
     onOpenQuiz: (target: QuizTarget, title: String) -> Unit = { _, _ -> },
 ) {
-    val (state, refresh) = rememberLoadable {
+    val (state, refresh) = rememberLoadable("deadlines") {
         container.moodleRepository.upcomingDeadlines(Instant.now().epochSecond - 3600)
     }
 
-    when (val s = state) {
-        is UiState.Loading -> LoadingBox()
-        is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
-        is UiState.Success -> {
-            if (s.data.isEmpty()) {
-                ErrorBox("今後の課題・小テストの締切はありません 🎉", onRetry = refresh)
-                return
-            }
-            val zone = ZoneId.systemDefault()
-            val grouped = s.data.sortedBy { it.timesort }
-                .groupBy { Instant.ofEpochSecond(it.timesort).atZone(zone).toLocalDate() }
+    PullToRefreshBox(
+        isRefreshing = state.isRefreshing,
+        onRefresh = refresh,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        when (val s = state) {
+            is UiState.Loading -> LoadingBox()
+            is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
+            is UiState.Success -> {
+                if (s.data.isEmpty()) {
+                    ErrorBox("今後の課題・小テストの締切はありません 🎉", onRetry = refresh)
+                    return@PullToRefreshBox
+                }
+                val zone = ZoneId.systemDefault()
+                val grouped = s.data.sortedBy { it.timesort }
+                    .groupBy { Instant.ofEpochSecond(it.timesort).atZone(zone).toLocalDate() }
 
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-            ) {
-                grouped.forEach { (date, events) ->
-                    item(key = "header-$date") {
-                        Text(
-                            text = dateLabel(date),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
-                        )
-                    }
-                    items(events, key = { it.id }) { event ->
-                        DeadlineCard(event) {
-                            openDeadlineEvent(
-                                event = event,
-                                onOpenUrl = onOpenUrl,
-                                onOpenAssignment = onOpenAssignment,
-                                onOpenQuiz = onOpenQuiz,
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                ) {
+                    grouped.forEach { (date, events) ->
+                        item(key = "header-$date") {
+                            Text(
+                                text = dateLabel(date),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
                             )
+                        }
+                        items(events, key = { it.id }) { event ->
+                            DeadlineCard(event) {
+                                openDeadlineEvent(
+                                    event = event,
+                                    onOpenUrl = onOpenUrl,
+                                    onOpenAssignment = onOpenAssignment,
+                                    onOpenQuiz = onOpenQuiz,
+                                )
+                            }
                         }
                     }
                 }

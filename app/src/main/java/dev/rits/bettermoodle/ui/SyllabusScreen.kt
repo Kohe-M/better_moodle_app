@@ -42,7 +42,7 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun SyllabusScreen(container: AppContainer) {
-    val (state, refresh) = rememberLoadable { container.moodleRepository.enrolledCourses() }
+    val (state, refresh) = rememberLoadable("courses") { container.moodleRepository.enrolledCourses() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 

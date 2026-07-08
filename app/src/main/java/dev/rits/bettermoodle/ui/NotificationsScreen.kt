@@ -11,9 +11,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,12 +37,13 @@ private enum class NotificationFilter(val label: String) {
 }
 
 /** Moodleの通知一覧。課題関連とそれ以外をフィルタで分けられる。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotificationsScreen(
     container: AppContainer,
     onOpenUrl: (url: String, title: String) -> Unit = { _, _ -> },
 ) {
-    val (state, refresh) = rememberLoadable { container.moodleRepository.notifications() }
+    val (state, refresh) = rememberLoadable("notifications") { container.moodleRepository.notifications() }
     var filter by remember { mutableStateOf(NotificationFilter.ALL) }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -54,26 +57,32 @@ fun NotificationsScreen(
                 )
             }
         }
-        when (val s = state) {
-            is UiState.Loading -> LoadingBox()
-            is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
-            is UiState.Success -> {
-                val filtered = s.data.notifications.filter {
-                    when (filter) {
-                        NotificationFilter.ALL -> true
-                        NotificationFilter.ASSIGN -> it.isAssignRelated()
-                        NotificationFilter.OTHER -> !it.isAssignRelated()
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = refresh,
+            modifier = Modifier.weight(1f),
+        ) {
+            when (val s = state) {
+                is UiState.Loading -> LoadingBox()
+                is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
+                is UiState.Success -> {
+                    val filtered = s.data.notifications.filter {
+                        when (filter) {
+                            NotificationFilter.ALL -> true
+                            NotificationFilter.ASSIGN -> it.isAssignRelated()
+                            NotificationFilter.OTHER -> !it.isAssignRelated()
+                        }
                     }
-                }
-                if (filtered.isEmpty()) {
-                    ErrorBox("通知はありません", onRetry = refresh)
-                    return
-                }
-                LazyColumn(contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
-                    items(filtered, key = { it.id }) { n ->
-                        NotificationCard(n) {
-                            n.contexturl?.takeIf { it.isNotBlank() }
-                                ?.let { onOpenUrl(it, n.contexturlname ?: n.subject) }
+                    if (filtered.isEmpty()) {
+                        ErrorBox("通知はありません", onRetry = refresh)
+                        return@PullToRefreshBox
+                    }
+                    LazyColumn(contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
+                        items(filtered, key = { it.id }) { n ->
+                            NotificationCard(n) {
+                                n.contexturl?.takeIf { it.isNotBlank() }
+                                    ?.let { onOpenUrl(it, n.contexturlname ?: n.subject) }
+                            }
                         }
                     }
                 }

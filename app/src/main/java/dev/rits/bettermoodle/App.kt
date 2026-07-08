@@ -13,6 +13,7 @@ import dev.rits.bettermoodle.data.MoodleClient
 import dev.rits.bettermoodle.data.MoodleRepository
 import dev.rits.bettermoodle.data.SessionStore
 import dev.rits.bettermoodle.data.SyllabusRepository
+import dev.rits.bettermoodle.ui.LoadableMemoryCache
 import dev.rits.bettermoodle.work.DeadlineWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -84,12 +85,14 @@ class AppContainer(private val app: Application) {
 
     suspend fun logout() {
         sessionStore.logout()
+        LoadableMemoryCache.clear()
         clearWebViewSession()
         currentToken = null
     }
 
     suspend fun clearAuthTokens() {
         sessionStore.clearAuthTokens()
+        LoadableMemoryCache.clear()
         currentToken = null
         clearMoodleWebSession()
     }

@@ -15,6 +15,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -33,7 +34,7 @@ fun CourseListScreen(
     onBack: () -> Unit,
     onOpenCourse: (courseId: Long, courseName: String, courseCode: String?) -> Unit,
 ) {
-    val (state, refresh) = rememberLoadable { container.moodleRepository.enrolledCourses() }
+    val (state, refresh) = rememberLoadable("courses") { container.moodleRepository.enrolledCourses() }
 
     Scaffold(
         topBar = {
@@ -51,22 +52,28 @@ fun CourseListScreen(
             )
         },
     ) { padding ->
-        when (val s = state) {
-            is UiState.Loading -> LoadingBox()
-            is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
-            is UiState.Success -> {
-                if (s.data.isEmpty()) {
-                    ErrorBox("履修中のコースが見つかりません", onRetry = refresh)
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                    ) {
-                        items(s.data, key = { it.id }) { course ->
-                            CourseCard(course) {
-                                onOpenCourse(course.id, course.displayName, course.courseCode)
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = refresh,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            when (val s = state) {
+                is UiState.Loading -> LoadingBox()
+                is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
+                is UiState.Success -> {
+                    if (s.data.isEmpty()) {
+                        ErrorBox("履修中のコースが見つかりません", onRetry = refresh)
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                        ) {
+                            items(s.data, key = { it.id }) { course ->
+                                CourseCard(course) {
+                                    onOpenCourse(course.id, course.displayName, course.courseCode)
+                                }
                             }
                         }
                     }

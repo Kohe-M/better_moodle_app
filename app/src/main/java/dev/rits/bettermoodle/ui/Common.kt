@@ -23,8 +23,11 @@ import dev.rits.bettermoodle.data.UrlPolicy
 sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
     data class Error(val message: String) : UiState<Nothing>
-    data class Success<T>(val data: T) : UiState<T>
+    data class Success<T>(val data: T, val refreshing: Boolean = false) : UiState<T>
 }
+
+val UiState<*>.isRefreshing: Boolean
+    get() = this is UiState.Loading || (this as? UiState.Success<*>)?.refreshing == true
 
 @Composable
 fun LoadingBox() {
