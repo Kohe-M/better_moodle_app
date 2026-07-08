@@ -356,7 +356,20 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
             modifier = Modifier.padding(padding),
         ) {
             composable("timetable") { TimetableScreen(container, onOpenCourse = ::openCourse) }
-            composable("deadlines") { DeadlinesScreen(container, onOpenUrl = ::openUrl) }
+            composable("deadlines") {
+                DeadlinesScreen(
+                    container = container,
+                    onOpenUrl = ::openUrl,
+                    onOpenAssignment = { courseId, moduleId, assignId, title ->
+                        rootNav.navigate(
+                            "assignment/$courseId/$moduleId/$assignId?title=${Uri.encode(title)}",
+                        )
+                    },
+                    onOpenQuiz = { target, title ->
+                        rootNav.navigate(quizRoute(target, title))
+                    },
+                )
+            }
             composable("notifications") { NotificationsScreen(container, onOpenUrl = ::openUrl) }
             composable("syllabus") { SyllabusScreen(container) }
             composable("portal") {

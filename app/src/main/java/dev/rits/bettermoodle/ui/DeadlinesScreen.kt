@@ -20,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.ActionEvent
+import dev.rits.bettermoodle.data.QuizTarget
+import dev.rits.bettermoodle.data.parseCourseModuleIdFromUrl
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -33,6 +35,8 @@ import java.time.format.DateTimeFormatter
 fun DeadlinesScreen(
     container: AppContainer,
     onOpenUrl: (url: String, title: String) -> Unit = { _, _ -> },
+    onOpenAssignment: (courseId: Long, moduleId: Long, assignId: Long, title: String) -> Unit = { _, _, _, _ -> },
+    onOpenQuiz: (target: QuizTarget, title: String) -> Unit = { _, _ -> },
 ) {
     val (state, refresh) = rememberLoadable {
         container.moodleRepository.upcomingDeadlines(Instant.now().epochSecond - 3600)
@@ -65,15 +69,56 @@ fun DeadlinesScreen(
                     }
                     items(events, key = { it.id }) { event ->
                         DeadlineCard(event) {
-                            val url = event.action?.url?.takeIf { it.isNotBlank() } ?: event.url
-                            if (!url.isNullOrBlank()) {
-                                onOpenUrl(url, event.activityname ?: event.name)
-                            }
+                            openDeadlineEvent(
+                                event = event,
+                                onOpenUrl = onOpenUrl,
+                                onOpenAssignment = onOpenAssignment,
+                                onOpenQuiz = onOpenQuiz,
+                            )
                         }
                     }
                 }
             }
         }
+    }
+}
+
+private fun openDeadlineEvent(
+    event: ActionEvent,
+    onOpenUrl: (url: String, title: String) -> Unit,
+    onOpenAssignment: (courseId: Long, moduleId: Long, assignId: Long, title: String) -> Unit,
+    onOpenQuiz: (target: QuizTarget, title: String) -> Unit,
+) {
+    val title = event.activityname ?: event.name
+    val actionUrl = event.action?.url?.takeIf { it.isNotBlank() }
+    val fallbackUrl = actionUrl ?: event.url
+    val courseId = event.course?.id?.takeIf { it > 0L }
+    val moduleId = parseCourseModuleIdFromUrl(actionUrl)
+    val instanceId = event.instance?.takeIf { it > 0L }
+
+    when (event.modulename) {
+        "assign" -> if (courseId != null && moduleId != null && instanceId != null) {
+            onOpenAssignment(courseId, moduleId, instanceId, title)
+            return
+        }
+        "quiz" -> if (courseId != null && moduleId != null && instanceId != null) {
+            onOpenQuiz(
+                QuizTarget(
+                    courseId = courseId,
+                    courseModuleId = moduleId,
+                    quizInstanceId = instanceId,
+                    contextId = null,
+                    modName = "quiz",
+                    url = actionUrl,
+                ),
+                title,
+            )
+            return
+        }
+    }
+
+    if (!fallbackUrl.isNullOrBlank()) {
+        onOpenUrl(fallbackUrl, title)
     }
 }
 

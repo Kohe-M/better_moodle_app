@@ -48,6 +48,7 @@ data class ActionEvent(
     val name: String = "",
     val activityname: String? = null,
     val modulename: String? = null,
+    val instance: Long? = null,
     val eventtype: String? = null,
     val timesort: Long = 0,
     val timestart: Long = 0,
