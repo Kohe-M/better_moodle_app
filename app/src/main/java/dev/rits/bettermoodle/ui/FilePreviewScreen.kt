@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -57,6 +58,7 @@ fun FilePreviewScreen(
     onBack: () -> Unit,
 ) {
     var state by remember(fileUrl, kind) { mutableStateOf<FilePreviewState>(FilePreviewState.Loading) }
+    var showDownloadShareDialog by remember(fileUrl) { mutableStateOf(false) }
 
     LaunchedEffect(fileUrl, kind) {
         state = FilePreviewState.Loading
@@ -81,6 +83,11 @@ fun FilePreviewScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showDownloadShareDialog = true }) {
+                        Icon(Icons.Filled.Share, contentDescription = "他のアプリで開く")
                     }
                 },
             )
@@ -120,7 +127,23 @@ fun FilePreviewScreen(
             }
         }
     }
+
+    if (showDownloadShareDialog) {
+        DownloadShareDialog(
+            container = container,
+            fileUrl = fileUrl,
+            filename = title,
+            mimeType = previewShareMimeType(kind),
+            onDismiss = { showDownloadShareDialog = false },
+        )
+    }
 }
+
+private fun previewShareMimeType(kind: PreviewKind): String? =
+    when (kind) {
+        PreviewKind.Text -> "text/plain"
+        else -> null
+    }
 
 private val filePreviewHttp = OkHttpClient()
 private const val MAX_IMAGE_BYTES = 10L * 1024L * 1024L

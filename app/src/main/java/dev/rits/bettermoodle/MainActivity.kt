@@ -169,9 +169,6 @@ private fun Root(container: AppContainer) {
                 fileUrl = url,
                 title = title,
                 onBack = { rootNav.popBackStack() },
-                onOpenExternally = {
-                    openInCustomTab(context, url)
-                },
             )
         }
 

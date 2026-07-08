@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -27,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.UrlPolicy
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -68,11 +70,12 @@ fun PdfPreviewScreen(
     fileUrl: String,
     title: String,
     onBack: () -> Unit,
-    onOpenExternally: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var state by remember(fileUrl) { mutableStateOf<PdfState>(PdfState.Loading) }
+    var showDownloadShareDialog by remember(fileUrl) { mutableStateOf(false) }
     val latestState by rememberUpdatedState(state)
     LaunchedEffect(fileUrl) {
         state = PdfState.Loading
@@ -111,8 +114,37 @@ fun PdfPreviewScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onOpenExternally) {
-                        Icon(Icons.Filled.OpenInBrowser, contentDescription = "ブラウザで開く")
+                    IconButton(
+                        onClick = {
+                            val ready = state as? PdfState.Ready
+                            if (ready == null) {
+                                showDownloadShareDialog = true
+                                return@IconButton
+                            }
+                            scope.launch {
+                                val shareFile = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        copyFileToDownloadShareCache(
+                                            cacheDir = context.cacheDir,
+                                            source = ready.file,
+                                            filename = title,
+                                            mimeType = "application/pdf",
+                                        )
+                                    }.getOrNull()
+                                }
+                                val opened = shareFile?.let {
+                                    openOrShareDownloadedFile(
+                                        context = context,
+                                        file = it,
+                                        mimeType = "application/pdf",
+                                        title = title,
+                                    )
+                                } == true
+                                if (!opened) showDownloadShareDialog = true
+                            }
+                        },
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = "他のアプリで開く")
                     }
                 },
             )
@@ -120,7 +152,7 @@ fun PdfPreviewScreen(
     ) { padding ->
         when (val s = state) {
             is PdfState.Loading -> LoadingBox()
-            is PdfState.Failed -> ErrorBox("${s.message}\n\n右上のボタンからブラウザで開けます")
+            is PdfState.Failed -> ErrorBox("${s.message}\n\n右上のボタンから他のアプリで開けます")
             is PdfState.Ready -> LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
@@ -146,6 +178,16 @@ fun PdfPreviewScreen(
                 }
             }
         }
+    }
+
+    if (showDownloadShareDialog) {
+        DownloadShareDialog(
+            container = container,
+            fileUrl = fileUrl,
+            filename = title,
+            mimeType = "application/pdf",
+            onDismiss = { showDownloadShareDialog = false },
+        )
     }
 }
 
