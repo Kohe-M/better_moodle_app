@@ -50,10 +50,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.rits.bettermoodle.auth.SsoLogin
 import dev.rits.bettermoodle.data.ForumTarget
+import dev.rits.bettermoodle.data.MoodleUrlTarget
 import dev.rits.bettermoodle.data.PageTarget
 import dev.rits.bettermoodle.data.PreviewKind
 import dev.rits.bettermoodle.data.QuizTarget
 import dev.rits.bettermoodle.data.UrlPolicy
+import dev.rits.bettermoodle.data.parseMoodleUrlTarget
 import dev.rits.bettermoodle.ui.AssignmentScreen
 import dev.rits.bettermoodle.ui.CourseScreen
 import dev.rits.bettermoodle.ui.CourseListScreen
@@ -71,6 +73,7 @@ import dev.rits.bettermoodle.ui.SyllabusScreen
 import dev.rits.bettermoodle.ui.TimetableScreen
 import dev.rits.bettermoodle.ui.openInCustomTab
 import dev.rits.bettermoodle.ui.theme.BetterMoodleTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -123,10 +126,14 @@ private fun Root(container: AppContainer) {
 
     val rootNav = rememberNavController()
     fun openUrl(url: String, title: String) {
-        when {
-            UrlPolicy.isAllowedMoodleWebViewUrl(url) ->
-                rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
-            UrlPolicy.canOpenExternally(url) -> openInCustomTab(context, url)
+        scope.launch {
+            val nativeRoute = resolveNativeRoute(container, url, title)
+            when {
+                nativeRoute != null -> rootNav.navigateFromUser(nativeRoute)
+                UrlPolicy.isAllowedMoodleWebViewUrl(url) ->
+                    rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
+                UrlPolicy.canOpenExternally(url) -> openInCustomTab(context, url)
+            }
         }
     }
 
@@ -351,6 +358,74 @@ private data class NavItem(
 private fun courseRoute(id: Long, name: String, code: String?): String =
     "course/$id?name=${Uri.encode(name)}&code=${Uri.encode(code ?: "")}"
 
+/**
+ * Moodle URLをネイティブ画面のrouteに解決する。解決できなければnull
+ * (呼び出し側で従来のWebView/Custom Tabにフォールバックする)。
+ */
+private suspend fun resolveNativeRoute(
+    container: AppContainer,
+    url: String,
+    title: String,
+): String? {
+    return when (val target = parseMoodleUrlTarget(url)) {
+        is MoodleUrlTarget.Course -> courseRoute(target.courseId, title.ifBlank { "コース" }, null)
+        is MoodleUrlTarget.Module -> {
+            if (target.modName !in setOf("assign", "quiz", "forum", "page")) return null
+            val cm = runCatching {
+                container.moodleRepository.courseModule(target.cmid)
+            }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                null
+            } ?: return null
+
+            val routeTitle = cm.name.ifBlank { title }
+            when (target.modName) {
+                "assign" -> cm.instance.takeIf { it > 0L }?.let { assignId ->
+                    "assignment/${cm.course}/${cm.id}/$assignId?title=${Uri.encode(routeTitle)}"
+                }
+                "quiz" -> cm.instance.takeIf { it > 0L }?.let { quizId ->
+                    quizRoute(
+                        QuizTarget(
+                            courseId = cm.course,
+                            courseModuleId = cm.id,
+                            quizInstanceId = quizId,
+                            contextId = null,
+                            modName = "quiz",
+                            url = url,
+                        ),
+                        routeTitle,
+                    )
+                }
+                "forum" -> cm.instance.takeIf { it > 0L }?.let { forumId ->
+                    forumRoute(
+                        ForumTarget(
+                            courseId = cm.course,
+                            courseModuleId = cm.id,
+                            forumInstanceId = forumId,
+                            contextId = null,
+                            modName = "forum",
+                            url = url,
+                        ),
+                        routeTitle,
+                    )
+                }
+                "page" -> pageRoute(
+                    PageTarget(
+                        courseId = cm.course,
+                        courseModuleId = cm.id,
+                        contextId = null,
+                        modName = "page",
+                        url = url,
+                    ),
+                    routeTitle,
+                )
+                else -> null
+            }
+        }
+        null -> null
+    }
+}
+
 private fun forumRoute(target: ForumTarget, title: String): String =
     "forum?courseId=${target.courseId}" +
         "&courseModuleId=${target.courseModuleId}" +
@@ -402,10 +477,14 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
     }
 
     fun openUrl(url: String, title: String) {
-        when {
-            UrlPolicy.isAllowedMoodleWebViewUrl(url) ->
-                rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
-            UrlPolicy.canOpenExternally(url) -> openInCustomTab(context, url)
+        scope.launch {
+            val nativeRoute = resolveNativeRoute(container, url, title)
+            when {
+                nativeRoute != null -> rootNav.navigateFromUser(nativeRoute)
+                UrlPolicy.isAllowedMoodleWebViewUrl(url) ->
+                    rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
+                UrlPolicy.canOpenExternally(url) -> openInCustomTab(context, url)
+            }
         }
     }
 
