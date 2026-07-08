@@ -54,10 +54,6 @@ import dev.rits.bettermoodle.data.quizHttpStatus
 import dev.rits.bettermoodle.data.quizLoadErrorMessage
 import dev.rits.bettermoodle.data.quizMoodleErrorCode
 import dev.rits.bettermoodle.data.quizTimeLimitLabel
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 private data class QuizUiData(
     val quiz: Quiz,
@@ -73,6 +69,7 @@ fun QuizScreen(
     target: QuizTarget,
     title: String,
     onBack: () -> Unit,
+    onOpenUrl: (String, String) -> Unit,
     onFallbackWeb: () -> Unit,
 ) {
     var refreshTick by remember { mutableIntStateOf(0) }
@@ -154,6 +151,7 @@ fun QuizScreen(
                 padding = padding,
                 data = s.data,
                 canOpenWeb = !target.url.isNullOrBlank(),
+                onOpenUrl = onOpenUrl,
                 onFallbackWeb = onFallbackWeb,
             )
         }
@@ -165,6 +163,7 @@ private fun QuizContent(
     padding: PaddingValues,
     data: QuizUiData,
     canOpenWeb: Boolean,
+    onOpenUrl: (String, String) -> Unit,
     onFallbackWeb: () -> Unit,
 ) {
     val quiz = data.quiz
@@ -177,9 +176,11 @@ private fun QuizContent(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(quiz.name, style = MaterialTheme.typography.headlineSmall)
-        htmlToPlainText(quiz.intro).takeIf { it.isNotBlank() }?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium)
-        }
+        HtmlText(
+            html = quiz.intro,
+            onOpenUrl = { onOpenUrl(it, quiz.name) },
+            style = MaterialTheme.typography.bodyMedium,
+        )
 
         QuizSummaryCard(quiz = quiz, bestGrade = data.bestGrade)
         QuizAttemptsCard(data.attempts)
@@ -283,12 +284,12 @@ private fun QuizErrorContent(
                 Text("Moodle画面で開く")
             }
         }
-        Text(
-            "errorcode: ${diagnostic?.safeMoodleErrorCode() ?: diagnostic?.kind?.diagnosticCode() ?: "UNKNOWN"}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         if (BuildConfig.DEBUG && diagnostic != null) {
+            Text(
+                "errorcode: ${diagnostic.safeMoodleErrorCode() ?: diagnostic.kind.diagnosticCode()}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                 Text(
                     diagnostic.toSafeText(),
@@ -329,10 +330,4 @@ private fun QuizDiagnostic.toSafeText(): String = buildString {
 }
 
 private fun formatQuizTime(epochSeconds: Long): String =
-    if (epochSeconds <= 0L) {
-        "未設定"
-    } else {
-        Instant.ofEpochSecond(epochSeconds)
-            .atZone(ZoneId.systemDefault())
-            .format(DateTimeFormatter.ofPattern("M月d日 HH:mm", Locale.JAPANESE))
-    }
+    formatMoodleDateTime(epochSeconds)

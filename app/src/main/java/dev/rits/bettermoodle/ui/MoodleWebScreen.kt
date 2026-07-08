@@ -68,7 +68,7 @@ fun MoodleWebScreen(
     ) { padding ->
         if (!UrlPolicy.isAllowedMoodleWebViewUrl(url)) {
             Box(Modifier.padding(padding)) {
-                ErrorBox("This Moodle URL cannot be opened safely.", onRetry = null)
+                ErrorBox("このMoodle URLは安全に開けません", onRetry = null)
             }
             return@Scaffold
         }

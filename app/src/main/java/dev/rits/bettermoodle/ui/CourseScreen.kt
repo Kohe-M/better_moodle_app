@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -76,10 +77,11 @@ fun CourseScreen(
     onOpenForum: (target: ForumTarget, title: String) -> Unit,
     onOpenQuiz: (target: QuizTarget, title: String) -> Unit,
     onOpenMoodleWeb: (url: String, title: String) -> Unit,
+    onOpenUrl: (url: String, title: String) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val (state, refresh) = rememberLoadable { container.moodleRepository.courseContents(courseId) }
+    val (state, refresh) = rememberLoadable("course:$courseId") { container.moodleRepository.courseContents(courseId) }
     var externalToConfirm by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     fun openModule(module: CourseModule) {
@@ -141,29 +143,35 @@ fun CourseScreen(
             )
         },
     ) { padding ->
-        when (val s = state) {
-            is UiState.Loading -> LoadingBox()
-            is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
-            is UiState.Success -> LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                s.data.filter { it.uservisible && it.modules.isNotEmpty() }.forEach { section ->
-                    item(key = "sec-${section.id}") { SectionHeader(section) }
-                    section.modules
-                        .filter { it.uservisible }
-                        .forEach { module ->
-                            item(key = "mod-${section.id}-${module.id}") {
-                                if (module.modName == "label") {
-                                    LabelText(module)
-                                } else {
-                                    ModuleRow(module) { openModule(module) }
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = refresh,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            when (val s = state) {
+                is UiState.Loading -> LoadingBox()
+                is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
+                is UiState.Success -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    s.data.filter { it.uservisible && it.modules.isNotEmpty() }.forEach { section ->
+                        item(key = "sec-${section.id}") { SectionHeader(section) }
+                        section.modules
+                            .filter { it.uservisible }
+                            .forEach { module ->
+                                item(key = "mod-${section.id}-${module.id}") {
+                                    if (module.modName == "label") {
+                                        LabelText(module, onOpenUrl)
+                                    } else {
+                                        ModuleRow(module) { openModule(module) }
+                                    }
                                 }
                             }
-                        }
+                    }
                 }
             }
         }
@@ -199,9 +207,10 @@ private fun SectionHeader(section: CourseSection) {
 }
 
 @Composable
-private fun LabelText(module: CourseModule) {
-    Text(
-        text = htmlToPlainText(module.description),
+private fun LabelText(module: CourseModule, onOpenUrl: (url: String, title: String) -> Unit) {
+    HtmlText(
+        html = module.description,
+        onOpenUrl = { onOpenUrl(it, module.name.ifBlank { "Moodle" }) },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),

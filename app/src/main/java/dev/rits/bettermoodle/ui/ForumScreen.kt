@@ -44,9 +44,6 @@ import dev.rits.bettermoodle.data.diagnosticCode
 import dev.rits.bettermoodle.data.forumHttpStatus
 import dev.rits.bettermoodle.data.forumLoadErrorMessage
 import dev.rits.bettermoodle.data.forumMoodleErrorCode
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,6 +52,7 @@ fun ForumScreen(
     target: ForumTarget,
     title: String,
     onBack: () -> Unit,
+    onOpenUrl: (String, String) -> Unit,
     onFallbackWeb: () -> Unit,
 ) {
     var selected by remember { mutableStateOf<ForumDiscussion?>(null) }
@@ -165,6 +163,7 @@ fun ForumScreen(
                 container = container,
                 discussion = selected!!,
                 target = target,
+                onOpenUrl = onOpenUrl,
                 modifier = Modifier.padding(padding),
             )
         }
@@ -199,11 +198,12 @@ private fun DiscussionPosts(
     container: AppContainer,
     discussion: ForumDiscussion,
     target: ForumTarget,
+    onOpenUrl: (String, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val discussionId = discussion.discussionIdForPosts()
     var diagnostic by remember { mutableStateOf<ForumDiagnostic?>(null) }
-    val (state, refresh) = rememberLoadable {
+    val (state, refresh) = rememberLoadable("forumPosts:$discussionId") {
         try {
             diagnostic = null
             container.moodleRepository.forumPosts(discussionId)
@@ -232,7 +232,7 @@ private fun DiscussionPosts(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(s.data, key = { it.id }) { post ->
-                PostCard(post)
+                PostCard(post, onOpenUrl)
             }
         }
     }
@@ -264,14 +264,14 @@ private fun ForumErrorActions(
                 Text("Moodle画面で開く")
             }
         }
-        diagnostic?.safeMoodleErrorCode()?.let { code ->
-            Text(
-                "Moodle errorcode: $code",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
         if (BuildConfig.DEBUG && diagnostic != null) {
+            diagnostic.safeMoodleErrorCode()?.let { code ->
+                Text(
+                    "Moodle errorcode: $code",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Card(Modifier.fillMaxWidth()) {
                 Text(
                     diagnostic.toSafeText(),
@@ -303,7 +303,7 @@ private fun ForumDiagnostic.toSafeText(): String = buildString {
 }
 
 @Composable
-private fun PostCard(post: ForumPost) {
+private fun PostCard(post: ForumPost, onOpenUrl: (String, String) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(post.subject, style = MaterialTheme.typography.titleMedium)
@@ -312,13 +312,14 @@ private fun PostCard(post: ForumPost) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(htmlToPlainText(post.message), style = MaterialTheme.typography.bodyMedium)
+            HtmlText(
+                html = post.message,
+                onOpenUrl = { onOpenUrl(it, post.subject.ifBlank { "フォーラム" }) },
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
 
 private fun formatTime(epochSeconds: Long): String =
-    if (epochSeconds <= 0) ""
-    else Instant.ofEpochSecond(epochSeconds)
-        .atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm"))
+    formatMoodleDateTime(epochSeconds)

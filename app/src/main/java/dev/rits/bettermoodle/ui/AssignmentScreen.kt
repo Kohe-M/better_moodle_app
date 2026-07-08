@@ -59,9 +59,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private data class AssignmentUiData(
@@ -79,6 +76,7 @@ fun AssignmentScreen(
     assignId: Long,
     title: String,
     onBack: () -> Unit,
+    onOpenUrl: (String, String) -> Unit,
     onOpenFilePreview: (SubmittedFileUi) -> Unit,
 ) {
     val context = LocalContext.current
@@ -175,12 +173,14 @@ fun AssignmentScreen(
                     val assignment = s.data.assignment
                     val ui = s.data.ui
                     Text(assignment.name, style = MaterialTheme.typography.headlineSmall)
-                    htmlToPlainText(assignment.intro).takeIf { it.isNotBlank() }?.let {
-                        Text(it, style = MaterialTheme.typography.bodyMedium)
-                    }
+                    HtmlText(
+                        html = assignment.intro,
+                        onOpenUrl = { onOpenUrl(it, assignment.name) },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                     AssignmentSummaryCard(assignment, ui)
-                    FeedbackBlock(s.data.status)
-                    SubmittedTextSection(ui)
+                    FeedbackBlock(s.data.status, onOpenUrl)
+                    SubmittedTextSection(ui, onOpenUrl)
                     SubmittedFilesSection(ui.files, onOpenFilePreview)
 
                     if (assignment.supports("onlinetext") && AssignmentAction.Edit in ui.actions) {
@@ -338,11 +338,15 @@ private fun AssignmentActions(
 }
 
 @Composable
-private fun SubmittedTextSection(ui: AssignmentUiModel) {
+private fun SubmittedTextSection(ui: AssignmentUiModel, onOpenUrl: (String, String) -> Unit) {
     val text = ui.onlineText?.let(::htmlToPlainText)?.takeIf { it.isNotBlank() }
     if (text != null) {
         Text("提出した文章", style = MaterialTheme.typography.titleMedium)
-        Text(text, style = MaterialTheme.typography.bodyMedium)
+        HtmlText(
+            html = ui.onlineText,
+            onOpenUrl = { onOpenUrl(it, "提出した文章") },
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
@@ -380,7 +384,7 @@ private fun SubmittedFilesSection(files: List<SubmittedFileUi>, onOpenFilePrevie
 }
 
 @Composable
-private fun FeedbackBlock(status: SubmissionStatusResponse) {
+private fun FeedbackBlock(status: SubmissionStatusResponse, onOpenUrl: (String, String) -> Unit) {
     val grade = status.feedback?.grade?.grade?.takeIf { it.isNotBlank() }
     val feedback = status.feedback?.plugins
         ?.flatMap { it.editorfields }
@@ -389,17 +393,15 @@ private fun FeedbackBlock(status: SubmissionStatusResponse) {
     if (grade != null || !feedback.isNullOrBlank()) {
         Text("評価・フィードバック", style = MaterialTheme.typography.titleMedium)
         if (grade != null) Text("評価: $grade")
-        htmlToPlainText(feedback).takeIf { it.isNotBlank() }?.let { Text(it) }
+        HtmlText(
+            html = feedback,
+            onOpenUrl = { onOpenUrl(it, "評価・フィードバック") },
+        )
     }
 }
 
-private fun formatAssignmentTime(epochSeconds: Long, suffix: String = ""): String {
-    if (epochSeconds <= 0) return "未設定"
-    val text = Instant.ofEpochSecond(epochSeconds)
-        .atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("M月d日（E）H:mm", Locale.JAPANESE))
-    return text + suffix
-}
+private fun formatAssignmentTime(epochSeconds: Long, suffix: String = ""): String =
+    formatMoodleDateTime(epochSeconds, suffix)
 
 private fun formatBytes(bytes: Long): String =
     when {

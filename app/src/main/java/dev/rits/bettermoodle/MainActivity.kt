@@ -105,6 +105,14 @@ private fun Root(container: AppContainer) {
     }
 
     val rootNav = rememberNavController()
+    fun openUrl(url: String, title: String) {
+        when {
+            UrlPolicy.isAllowedMoodleWebViewUrl(url) ->
+                rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
+            UrlPolicy.canOpenExternally(url) -> openInCustomTab(context, url)
+        }
+    }
+
     NavHost(navController = rootNav, startDestination = "main") {
         composable("main") { MainTabs(container, rootNav) }
 
@@ -149,6 +157,7 @@ private fun Root(container: AppContainer) {
                 onOpenMoodleWeb = { url, title ->
                     rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
                 },
+                onOpenUrl = ::openUrl,
             )
         }
 
@@ -172,8 +181,9 @@ private fun Root(container: AppContainer) {
                 courseId = entry.arguments?.getString("courseId")?.toLongOrNull() ?: 0L,
                 moduleId = entry.arguments?.getString("moduleId")?.toLongOrNull() ?: 0L,
                 assignId = entry.arguments?.getString("assignId")?.toLongOrNull() ?: 0L,
-                title = entry.arguments?.getString("title") ?: "Assignment",
+                title = entry.arguments?.getString("title") ?: "課題",
                 onBack = { rootNav.popBackStack() },
+                onOpenUrl = ::openUrl,
                 onOpenFilePreview = { file ->
                     val url = file.sourceUrl ?: return@AssignmentScreen
                     when (file.previewKind) {
@@ -200,7 +210,7 @@ private fun Root(container: AppContainer) {
             FilePreviewScreen(
                 container = container,
                 fileUrl = entry.arguments?.getString("url").orEmpty(),
-                title = entry.arguments?.getString("title") ?: "Preview",
+                title = entry.arguments?.getString("title") ?: "プレビュー",
                 kind = kind,
                 onBack = { rootNav.popBackStack() },
             )
@@ -218,12 +228,13 @@ private fun Root(container: AppContainer) {
             ForumScreen(
                 container = container,
                 target = target,
-                title = entry.arguments?.getString("title") ?: "Forum",
+                title = entry.arguments?.getString("title") ?: "フォーラム",
                 onBack = { rootNav.popBackStack() },
+                onOpenUrl = ::openUrl,
                 onFallbackWeb = {
                     val url = target.url
                     if (!url.isNullOrBlank()) {
-                        rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("Forum")}")
+                        rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("フォーラム")}")
                     }
                 },
             )
@@ -241,12 +252,13 @@ private fun Root(container: AppContainer) {
             QuizScreen(
                 container = container,
                 target = target,
-                title = entry.arguments?.getString("title") ?: "Quiz",
+                title = entry.arguments?.getString("title") ?: "小テスト",
                 onBack = { rootNav.popBackStack() },
+                onOpenUrl = ::openUrl,
                 onFallbackWeb = {
                     val url = target.url
                     if (!url.isNullOrBlank()) {
-                        rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("Quiz")}")
+                        rootNav.navigate("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode("小テスト")}")
                     }
                 },
             )
