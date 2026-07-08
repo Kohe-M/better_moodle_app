@@ -232,17 +232,21 @@ fun CourseScreen(
                 ) {
                     s.data.filter { it.uservisible && it.modules.isNotEmpty() }.forEach { section ->
                         item(key = "sec-${section.id}") { SectionHeader(section) }
-                        section.modules
-                            .filter { it.uservisible }
-                            .forEach { module ->
-                                item(key = "mod-${section.id}-${module.id}") {
-                                    if (module.modName == "label") {
-                                        LabelText(module, onOpenUrl)
-                                    } else {
-                                        ModuleRow(module) { openModule(module) }
-                                    }
+                        val visibleModules = section.modules.filter { it.uservisible }
+                        visibleModules.forEachIndexed { index, module ->
+                            val followsModule = index > 0 && visibleModules[index - 1].modName != "label"
+                            item(key = "mod-${section.id}-${module.id}") {
+                                if (module.modName == "label") {
+                                    LabelText(module, onOpenUrl, indented = followsModule)
+                                } else {
+                                    ModuleRow(
+                                        module = module,
+                                        onOpenUrl = onOpenUrl,
+                                        onClick = { openModule(module) },
+                                    )
                                 }
                             }
+                        }
                     }
                 }
             }
@@ -366,18 +370,31 @@ private fun SectionHeader(section: CourseSection) {
 }
 
 @Composable
-private fun LabelText(module: CourseModule, onOpenUrl: (url: String, title: String) -> Unit) {
+private fun LabelText(
+    module: CourseModule,
+    onOpenUrl: (url: String, title: String) -> Unit,
+    indented: Boolean,
+) {
     HtmlText(
         html = module.description,
         onOpenUrl = { onOpenUrl(it, module.name.ifBlank { "Moodle" }) },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+        modifier = Modifier.padding(
+            start = if (indented) 60.dp else 4.dp,
+            top = if (indented) 0.dp else 2.dp,
+            end = 4.dp,
+            bottom = if (indented) 0.dp else 2.dp,
+        ),
     )
 }
 
 @Composable
-fun ModuleRow(module: CourseModule, onClick: () -> Unit) {
+fun ModuleRow(
+    module: CourseModule,
+    onOpenUrl: (url: String, title: String) -> Unit,
+    onClick: () -> Unit,
+) {
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
@@ -411,6 +428,15 @@ fun ModuleRow(module: CourseModule, onClick: () -> Unit) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (htmlToPlainText(module.description).isNotBlank()) {
+                    HtmlText(
+                        html = module.description,
+                        onOpenUrl = { onOpenUrl(it, module.name.ifBlank { "Moodle" }) },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
             }
         }
     }
