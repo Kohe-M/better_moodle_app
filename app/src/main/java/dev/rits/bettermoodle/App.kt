@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.webkit.CookieManager
 import android.webkit.WebStorage
 import androidx.core.app.NotificationCompat
+import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import dev.rits.bettermoodle.data.MoodleClient
@@ -45,7 +47,9 @@ class App : Application() {
     }
 
     private fun scheduleDeadlineWorker() {
-        val request = PeriodicWorkRequestBuilder<DeadlineWorker>(6, TimeUnit.HOURS).build()
+        val request = PeriodicWorkRequestBuilder<DeadlineWorker>(6, TimeUnit.HOURS)
+            .setConstraints(Constraints(requiredNetworkType = NetworkType.CONNECTED))
+            .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             DeadlineWorker.WORK_NAME,
             ExistingPeriodicWorkPolicy.KEEP,

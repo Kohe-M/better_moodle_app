@@ -1,6 +1,7 @@
 package dev.rits.bettermoodle.ui
 
 import android.annotation.SuppressLint
+import android.os.SystemClock
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -40,6 +41,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URI
+
+private const val LOGIN_POLLING_TIMEOUT_MILLIS = 10 * 60 * 1000L
 
 /** Logcat用 (DEBUGのみ): スキーム+ホスト+パスのみ。クエリ・フラグメントは出さない。 */
 private fun loginDebugUrlLabel(url: String): String {
@@ -112,7 +115,12 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
         // あり (KMSI後のPOSTリダイレクト連鎖など)、その場合ページイベントが一切来ない。
         // SSO中は定期的に launch.php を直叩きし、セッション成立を検出してトークンを回収する。
         LaunchedEffect(Unit) {
-            while (!tokenDelivered && loginError == null) {
+            val startedAt = SystemClock.elapsedRealtime()
+            while (
+                !tokenDelivered &&
+                loginError == null &&
+                SystemClock.elapsedRealtime() - startedAt < LOGIN_POLLING_TIMEOUT_MILLIS
+            ) {
                 val tokens = probeLaunchToken()
                 if (tokens != null) {
                     deliverTokens(tokens)
