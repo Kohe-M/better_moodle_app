@@ -19,6 +19,15 @@ object UrlPolicy {
     fun isHttpsUrl(url: String): Boolean =
         parse(url)?.scheme.equals("https", ignoreCase = true)
 
+    /** Moodleホストのhttp URLをhttpsに揃える (古いプラグインの通知URL対策)。他はそのまま返す。 */
+    fun normalizeMoodleUrl(url: String): String {
+        val source = url.trim()
+        val uri = parse(source) ?: return source
+        if (!uri.scheme.equals("http", ignoreCase = true)) return source
+        if (!uri.host.equals(MOODLE_HOST, ignoreCase = true)) return source
+        return source.replaceRange(0, "http".length, "https")
+    }
+
     fun isAllowedMoodleUrl(url: String): Boolean {
         val uri = parse(url) ?: return false
         return uri.scheme.equals("https", ignoreCase = true) &&

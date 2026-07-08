@@ -1,7 +1,9 @@
 package dev.rits.bettermoodle.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,6 +16,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -45,6 +48,7 @@ fun NotificationsScreen(
 ) {
     val (state, refresh) = rememberLoadable("notifications") { container.moodleRepository.notifications() }
     var filter by remember { mutableStateOf(NotificationFilter.ALL) }
+    var selectedNotification by remember { mutableStateOf<PopupNotification?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
@@ -80,14 +84,26 @@ fun NotificationsScreen(
                     LazyColumn(contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
                         items(filtered, key = { it.id }) { n ->
                             NotificationCard(n) {
-                                n.contexturl?.takeIf { it.isNotBlank() }
-                                    ?.let { onOpenUrl(it, n.contexturlname ?: n.subject) }
+                                val contextUrl = n.contexturl?.takeIf { it.isNotBlank() }
+                                if (contextUrl != null) {
+                                    onOpenUrl(contextUrl, n.contexturlname ?: n.subject)
+                                } else {
+                                    selectedNotification = n
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    selectedNotification?.let { notification ->
+        NotificationDetailSheet(
+            notification = notification,
+            onDismiss = { selectedNotification = null },
+            onOpenUrl = onOpenUrl,
+        )
     }
 }
 
@@ -138,6 +154,52 @@ private fun NotificationCard(n: PopupNotification, onClick: () -> Unit) {
                 color = MaterialTheme.colorScheme.outline,
                 modifier = Modifier.padding(top = 4.dp),
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NotificationDetailSheet(
+    notification: PopupNotification,
+    onDismiss: () -> Unit,
+    onOpenUrl: (url: String, title: String) -> Unit,
+) {
+    val fullHtml = notification.fullmessagehtml
+        ?.takeIf { htmlToPlainText(it).isNotBlank() }
+    val fallbackMessage = notification.smallmessage
+        ?.let { Jsoup.parse(it).text().trim() }
+        ?.takeIf { it.isNotBlank() }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        LazyColumn(
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                top = 8.dp,
+                end = 16.dp,
+                bottom = 24.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item(key = "subject") {
+                Text(notification.subject, style = MaterialTheme.typography.titleMedium)
+            }
+            item(key = "body") {
+                if (fullHtml != null) {
+                    HtmlText(
+                        html = fullHtml,
+                        onOpenUrl = { url ->
+                            onDismiss()
+                            onOpenUrl(url, notification.contexturlname ?: notification.subject)
+                        },
+                    )
+                } else {
+                    Text(
+                        fallbackMessage ?: "本文はありません",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
         }
     }
 }

@@ -10,6 +10,26 @@ import org.junit.Test
 class UrlPolicyTest {
 
     @Test
+    fun `normalizes Moodle http URL to https`() {
+        assertEquals(
+            "https://lms.ritsumei.ac.jp/mod/assign/view.php?id=42",
+            UrlPolicy.normalizeMoodleUrl("  HTTP://lms.ritsumei.ac.jp/mod/assign/view.php?id=42  "),
+        )
+    }
+
+    @Test
+    fun `normalize keeps Moodle https URL unchanged`() {
+        val url = "https://lms.ritsumei.ac.jp/mod/assign/view.php?id=42"
+        assertEquals(url, UrlPolicy.normalizeMoodleUrl(url))
+    }
+
+    @Test
+    fun `normalize keeps other http host unchanged`() {
+        val url = "http://example.com/mod/assign/view.php?id=42"
+        assertEquals(url, UrlPolicy.normalizeMoodleUrl(url))
+    }
+
+    @Test
     fun `allows only Moodle pluginfile URL for token append`() {
         val url = "https://lms.ritsumei.ac.jp/pluginfile.php/123/mod_resource/content/1/a.pdf"
         val authed = UrlPolicy.appendMoodleToken(url, "secret")!!

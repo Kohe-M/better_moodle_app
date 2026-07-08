@@ -1,9 +1,12 @@
 package dev.rits.bettermoodle
 
 import android.Manifest
+import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -75,6 +78,7 @@ import dev.rits.bettermoodle.ui.openInCustomTab
 import dev.rits.bettermoodle.ui.theme.BetterMoodleTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.net.URI
 
 class MainActivity : ComponentActivity() {
 
@@ -126,13 +130,15 @@ private fun Root(container: AppContainer) {
 
     val rootNav = rememberNavController()
     fun openUrl(url: String, title: String) {
+        val normalized = UrlPolicy.normalizeMoodleUrl(url)
         scope.launch {
-            val nativeRoute = resolveNativeRoute(container, url, title)
+            val nativeRoute = resolveNativeRoute(container, normalized, title)
             when {
                 nativeRoute != null -> rootNav.navigateFromUser(nativeRoute)
-                UrlPolicy.isAllowedMoodleWebViewUrl(url) ->
-                    rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
-                UrlPolicy.canOpenExternally(url) -> openInCustomTab(context, url)
+                UrlPolicy.isAllowedMoodleWebViewUrl(normalized) ->
+                    rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(normalized)}&title=${Uri.encode(title)}")
+                UrlPolicy.canOpenExternally(normalized) -> openInCustomTab(context, normalized)
+                else -> showUnhandledUrl(context, normalized)
             }
         }
     }
@@ -452,6 +458,24 @@ private fun pageRoute(target: PageTarget, title: String): String =
         "&title=${Uri.encode(title)}" +
         "&url=${Uri.encode(target.url.orEmpty())}"
 
+private fun showUnhandledUrl(context: Context, url: String) {
+    if (BuildConfig.DEBUG) {
+        Log.d("OpenUrl", "unhandled: ${debugUrlLabel(url)}")
+    }
+    Toast.makeText(context, "このリンクは開けません", Toast.LENGTH_SHORT).show()
+}
+
+/** Logcat用 (DEBUGのみ): クエリ・フラグメントは含めない。 */
+private fun debugUrlLabel(url: String): String {
+    val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return "(unparseable)"
+    val scheme = uri.scheme?.lowercase() ?: return "(no-scheme)"
+    return if (scheme == "http" || scheme == "https") {
+        "$scheme://${uri.host.orEmpty()}${uri.path.orEmpty()}"
+    } else {
+        "$scheme://"
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
@@ -477,13 +501,15 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
     }
 
     fun openUrl(url: String, title: String) {
+        val normalized = UrlPolicy.normalizeMoodleUrl(url)
         scope.launch {
-            val nativeRoute = resolveNativeRoute(container, url, title)
+            val nativeRoute = resolveNativeRoute(container, normalized, title)
             when {
                 nativeRoute != null -> rootNav.navigateFromUser(nativeRoute)
-                UrlPolicy.isAllowedMoodleWebViewUrl(url) ->
-                    rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
-                UrlPolicy.canOpenExternally(url) -> openInCustomTab(context, url)
+                UrlPolicy.isAllowedMoodleWebViewUrl(normalized) ->
+                    rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(normalized)}&title=${Uri.encode(title)}")
+                UrlPolicy.canOpenExternally(normalized) -> openInCustomTab(context, normalized)
+                else -> showUnhandledUrl(context, normalized)
             }
         }
     }
