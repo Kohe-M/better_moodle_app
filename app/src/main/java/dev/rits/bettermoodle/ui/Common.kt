@@ -27,7 +27,7 @@ sealed interface UiState<out T> {
 }
 
 val UiState<*>.isRefreshing: Boolean
-    get() = this is UiState.Loading || (this as? UiState.Success<*>)?.refreshing == true
+    get() = (this as? UiState.Success<*>)?.refreshing == true
 
 @Composable
 fun LoadingBox() {
