@@ -22,7 +22,7 @@
 
 ### G01 / P1 — ログイン中のポーリングが Moodle セッションの wantsurl を上書きする【コード確認・要再現】
 
-**根拠:** [LoginScreen.kt:90](app/src/main/java/dev/rits/bettermoodle/ui/LoginScreen.kt:90) の `probeLaunchToken()` は、呼ぶたびに `SsoLogin.newPassport()` で**新しい passport** を作る。一方、WebView は画面の `passport` で launch.php を開き、[LoginScreen.kt](app/src/main/java/dev/rits/bettermoodle/ui/LoginScreen.kt) の `handleTokenUrl` はその passport で署名を検証する。
+**根拠:** [LoginScreen.kt:90](../../app/src/main/java/dev/rits/bettermoodle/ui/LoginScreen.kt:90) の `probeLaunchToken()` は、呼ぶたびに `SsoLogin.newPassport()` で**新しい passport** を作る。一方、WebView は画面の `passport` で launch.php を開き、[LoginScreen.kt](../../app/src/main/java/dev/rits/bettermoodle/ui/LoginScreen.kt) の `handleTokenUrl` はその passport で署名を検証する。
 
 プローブは WebView の `MoodleSession` Cookie を付けて launch.php を1.5秒ごとに叩く。未ログインの launch.php は `require_login` で `$SESSION->wantsurl` に**自分のURL (プローブの passport 付き)** を保存する。SSO 完了後、Moodle は WebView を wantsurl へ戻すので、WebView に届くトークンURLは**プローブの passport で署名**されている。
 
@@ -37,7 +37,7 @@
 
 ### G02 / P1 — セッション失効で課題の未保存本文が消える【コード確認】
 
-**根拠:** [MainActivity.kt:165](app/src/main/java/dev/rits/bettermoodle/MainActivity.kt:165) は `key(a.generation) { LoggedInRoot(...) }`。どこかの通信で `invalidtoken` を受けると `AuthSession.onAuthError` → `LoggedOut` になり、`LoggedInRoot` とその `NavHost` がコンポジションから外れる。課題画面の `AssignmentViewModel` と `SavedStateHandle` (草稿の唯一の保存先) は、再ログイン後の新しい NavHost からは参照されない。
+**根拠:** [MainActivity.kt:165](../../app/src/main/java/dev/rits/bettermoodle/MainActivity.kt:165) は `key(a.generation) { LoggedInRoot(...) }`。どこかの通信で `invalidtoken` を受けると `AuthSession.onAuthError` → `LoggedOut` になり、`LoggedInRoot` とその `NavHost` がコンポジションから外れる。課題画面の `AssignmentViewModel` と `SavedStateHandle` (草稿の唯一の保存先) は、再ログイン後の新しい NavHost からは参照されない。
 
 **動作への影響:** 長文を入力中にトークンが失効する (管理者による失効・期限・別端末からの失効など) と、**入力中の本文が警告なしに消える**。前回までに作り込んだ「保留草稿 (orphan)」経路は、同じ SavedStateHandle を再利用するときしか働かないので、この最も起きやすい経路では何も残らない。旧 NavHost の ViewModelStore もアクティビティ終了まで解放されない (リーク)。
 
@@ -50,7 +50,7 @@
 
 ### G03 / P1 — 特定の文字を含むファイル名を提出できない【契約確認】
 
-**根拠:** [MoodleRepository.kt:301](app/src/main/java/dev/rits/bettermoodle/data/MoodleRepository.kt:301) は、upload.php の応答ファイル名が送ったファイル名と異なると `uploadfailed` にする。Moodle の upload.php はファイル名を `clean_param(PARAM_FILE)` で整形し、制御文字と `& < > " \` | ' : \ /` を**削除**する。[AssignmentViewModel.kt:205](app/src/main/java/dev/rits/bettermoodle/ui/AssignmentViewModel.kt:205) は ContentProvider の表示名をそのまま使う。
+**根拠:** [MoodleRepository.kt:301](../../app/src/main/java/dev/rits/bettermoodle/data/MoodleRepository.kt:301) は、upload.php の応答ファイル名が送ったファイル名と異なると `uploadfailed` にする。Moodle の upload.php はファイル名を `clean_param(PARAM_FILE)` で整形し、制御文字と `& < > " \` | ' : \ /` を**削除**する。[AssignmentViewModel.kt:205](../../app/src/main/java/dev/rits/bettermoodle/ui/AssignmentViewModel.kt:205) は ContentProvider の表示名をそのまま使う。
 
 **動作への影響:** `レポート&資料.pdf` や `it's.docx` のようなファイルを選ぶと、アップロード自体は成功するのに「ファイルの準備に失敗しました: Upload stored a different filename」となり、提出できない。利用者には原因が分からない。
 
@@ -64,7 +64,7 @@
 
 ### G04 / P2 — アプリ scope の例外でアプリが落ちる、またはログイン画面で固まる【コード確認】
 
-**根拠:** [App.kt:84](app/src/main/java/dev/rits/bettermoodle/App.kt:84) の `appScope` には `CoroutineExceptionHandler` がない。[AuthSession.kt:75-90](app/src/main/java/dev/rits/bettermoodle/data/AuthSession.kt:75) の `start()`、`login()`、`logout()` は、DataStore の IOException/CorruptionException や Keystore の例外 (`encryptToken`) をそのまま投げる。`launch` 内の未捕捉例外は Android ではプロセスを終了させる。
+**根拠:** [App.kt:84](../../app/src/main/java/dev/rits/bettermoodle/App.kt:84) の `appScope` には `CoroutineExceptionHandler` がない。[AuthSession.kt:75-90](../../app/src/main/java/dev/rits/bettermoodle/data/AuthSession.kt:75) の `start()`、`login()`、`logout()` は、DataStore の IOException/CorruptionException や Keystore の例外 (`encryptToken`) をそのまま投げる。`launch` 内の未捕捉例外は Android ではプロセスを終了させる。
 
 **動作への影響:** 端末の Keystore 不調や DataStore 破損があると、起動時またはログイン直後にクラッシュする。`login()` が失敗しても LoginScreen の `tokenDelivered` は true のままなので、クラッシュしなかった場合もボタンが反応しなくなる。
 
@@ -74,7 +74,7 @@
 
 ### G05 / P2 — シラバス検索が Salesforce の更新で止まる【契約確認・要再現】
 
-**根拠:** [SyllabusRepository.kt:239](app/src/main/java/dev/rits/bettermoodle/data/SyllabusRepository.kt:239) で Aura の `fwuid` を固定値で持つ。Salesforce の fwuid はプラットフォームのリリース (年3回) で変わり、古い値の要求には `clientOutOfSync` が返る。現在の実装ではこれを `InvalidResponse` として扱うだけ。
+**根拠:** [SyllabusRepository.kt:239](../../app/src/main/java/dev/rits/bettermoodle/data/SyllabusRepository.kt:239) で Aura の `fwuid` を固定値で持つ。Salesforce の fwuid はプラットフォームのリリース (年3回) で変わり、古い値の要求には `clientOutOfSync` が返る。現在の実装ではこれを `InvalidResponse` として扱うだけ。
 
 **動作への影響:** Salesforce の定期更新のたびに、シラバス検索・コース画面の「シラバス」ボタンが「応答形式が変わった可能性があります」で使えなくなり、アプリの更新を出すまで直らない。
 
@@ -84,7 +84,7 @@
 
 ### G06 / P2 — 巨大ファイルを選ぶと上限確認の前に全体をキャッシュへコピーする【コード確認】
 
-**根拠:** [AssignmentViewModel.kt:206](app/src/main/java/dev/rits/bettermoodle/ui/AssignmentViewModel.kt:206) は、選んだファイルを無制限に `cacheDir` へコピーしてから、Editor で `maxSubmissionSizeBytes` を確認する。
+**根拠:** [AssignmentViewModel.kt:206](../../app/src/main/java/dev/rits/bettermoodle/ui/AssignmentViewModel.kt:206) は、選んだファイルを無制限に `cacheDir` へコピーしてから、Editor で `maxSubmissionSizeBytes` を確認する。
 
 **動作への影響:** 誤って数GBの動画を選ぶと、長時間「ファイルを準備中」のまま端末のストレージを消費し、最後にサイズ超過で失敗する。容量不足で他のキャッシュにも影響する。
 
@@ -92,29 +92,29 @@
 
 ### G07 / P2 — 表示中のビットマップを recycle するため描画時にクラッシュし得る【コード確認・要再現】
 
-**根拠:** [PdfPreviewScreen.kt:297](app/src/main/java/dev/rits/bettermoodle/ui/PdfPreviewScreen.kt:297)、[PageScreen.kt:282](app/src/main/java/dev/rits/bettermoodle/ui/PageScreen.kt:282)、[FilePreviewScreen.kt:114](app/src/main/java/dev/rits/bettermoodle/ui/FilePreviewScreen.kt:114) が `onDispose` で `Bitmap.recycle()` を呼ぶ。Compose は破棄と同じフレームで古い `ImageBitmap` を描画することがあり、「recycled bitmap を描画しようとした」例外になる。PDF は1ページ最大約16MBのビットマップを LazyColumn で次々に作るので、高速スクロールで発生しやすい。
+**根拠:** [PdfPreviewScreen.kt:297](../../app/src/main/java/dev/rits/bettermoodle/ui/PdfPreviewScreen.kt:297)、[PageScreen.kt:282](../../app/src/main/java/dev/rits/bettermoodle/ui/PageScreen.kt:282)、[FilePreviewScreen.kt:114](../../app/src/main/java/dev/rits/bettermoodle/ui/FilePreviewScreen.kt:114) が `onDispose` で `Bitmap.recycle()` を呼ぶ。Compose は破棄と同じフレームで古い `ImageBitmap` を描画することがあり、「recycled bitmap を描画しようとした」例外になる。PDF は1ページ最大約16MBのビットマップを LazyColumn で次々に作るので、高速スクロールで発生しやすい。
 
 **修正:** 手動の `recycle()` をやめて GC に任せる (API 26以降、ビットマップの画素はネイティブヒープにあり、参照が切れれば解放される)。PDF はページ数分の LRU キャッシュ (合計サイズ上限付き) を置く。
 
 ### G08 / P2 — アプリ内 Moodle WebView の SSO 許可ホストが少なく、再ログインで止まり得る【コード確認・要再現】
 
-**根拠:** [UrlPolicy.kt:91](app/src/main/java/dev/rits/bettermoodle/data/UrlPolicy.kt:91) の `isAllowedSsoWebViewUrl` は lms と Microsoft の5ホストだけを許可する。ログイン画面 (全 https を許可) と基準が違う。autologin キーは6分に1回しか取れないため ([MoodleRepository.kt:396](app/src/main/java/dev/rits/bettermoodle/data/MoodleRepository.kt:396))、2回目以降に Moodle 画面を開くと SSO へ飛ぶことがある。MFA 登録・デバイス登録・シームレスSSO (`login.microsoft.com`、`autologon.microsoftazuread-sso.com`、`mysignins.microsoft.com` 等) を経由すると遷移がブロックされる。
+**根拠:** [UrlPolicy.kt:91](../../app/src/main/java/dev/rits/bettermoodle/data/UrlPolicy.kt:91) の `isAllowedSsoWebViewUrl` は lms と Microsoft の5ホストだけを許可する。ログイン画面 (全 https を許可) と基準が違う。autologin キーは6分に1回しか取れないため ([MoodleRepository.kt:396](../../app/src/main/java/dev/rits/bettermoodle/data/MoodleRepository.kt:396))、2回目以降に Moodle 画面を開くと SSO へ飛ぶことがある。MFA 登録・デバイス登録・シームレスSSO (`login.microsoft.com`、`autologon.microsoftazuread-sso.com`、`mysignins.microsoft.com` 等) を経由すると遷移がブロックされる。
 
 **修正:** Moodle WebView でも「SSO 途中の https は許可し、Moodle に戻れなければバナーで外部ブラウザへ誘導」に揃えるか、実機ログで経由ホストを確認して許可リストを更新する。autologin の時刻は失敗時に戻し、ログアウト時にリセットする。
 
 ### G09 / P2 — ポータルは戻る操作とタブ切替で状態を失う【コード確認】
 
-**根拠:** [PortalScreen.kt:88](app/src/main/java/dev/rits/bettermoodle/ui/PortalScreen.kt:88) は `onPageFinished` でしか `canGoBack` を更新しない。ポータル (Salesforce Lightning) は history API で画面を切り替えるので、ページ内遷移後も `canGoBack` が false のままになり、戻るキーでポータル内ではなくアプリの前画面へ戻る。また [MainActivity.kt:718](app/src/main/java/dev/rits/bettermoodle/MainActivity.kt:718) の NavHost はタブを離れると WebView を破棄するので、タブを戻るたびにトップから再読込になる。
+**根拠:** [PortalScreen.kt:88](../../app/src/main/java/dev/rits/bettermoodle/ui/PortalScreen.kt:88) は `onPageFinished` でしか `canGoBack` を更新しない。ポータル (Salesforce Lightning) は history API で画面を切り替えるので、ページ内遷移後も `canGoBack` が false のままになり、戻るキーでポータル内ではなくアプリの前画面へ戻る。また [MainActivity.kt:718](../../app/src/main/java/dev/rits/bettermoodle/MainActivity.kt:718) の NavHost はタブを離れると WebView を破棄するので、タブを戻るたびにトップから再読込になる。
 
 **修正:** `doUpdateVisitedHistory` で `canGoBack` を更新する。WebView インスタンスをタブの外 (MainTabs レベル) で保持するか、`saveState/restoreState` で履歴を復元する。
 
 ### G10 / P2 — 通知タップの宛先を「開く前に」消費済みにする【コード確認】
 
-**根拠:** [MainActivity.kt:205](app/src/main/java/dev/rits/bettermoodle/MainActivity.kt:205) の `openUrl` は `scope.launch` で非同期に `courseModule` の通信を行う。直後の `markDeepLinkConsumed` は通信の完了を待たない。コメントにある「遷移要求 → 記録」の順序は実際には保証されていない。
+**根拠:** [MainActivity.kt:205](../../app/src/main/java/dev/rits/bettermoodle/MainActivity.kt:205) の `openUrl` は `scope.launch` で非同期に `courseModule` の通信を行う。直後の `markDeepLinkConsumed` は通信の完了を待たない。コメントにある「遷移要求 → 記録」の順序は実際には保証されていない。
 
 **動作への影響:** 通信中にプロセスが終了すると、開いていない宛先が消費済みになり、OS の再配達では開かれない。影響は小さいが、コメントと実装が食い違っている。
 
-**修正:** `openUrl` を suspend 関数にして route 解決と navigate を待ってから記録する。LoggedInRoot と MainTabs に重複している `openUrl` を1つにまとめる ([MainActivity.kt:180](app/src/main/java/dev/rits/bettermoodle/MainActivity.kt:180) と [MainActivity.kt:624](app/src/main/java/dev/rits/bettermoodle/MainActivity.kt:624))。
+**修正:** `openUrl` を suspend 関数にして route 解決と navigate を待ってから記録する。LoggedInRoot と MainTabs に重複している `openUrl` を1つにまとめる ([MainActivity.kt:180](../../app/src/main/java/dev/rits/bettermoodle/MainActivity.kt:180) と [MainActivity.kt:624](../../app/src/main/java/dev/rits/bettermoodle/MainActivity.kt:624))。
 
 ---
 
@@ -124,10 +124,10 @@
 |---|---|---|---|
 | G11 | ファイル取得用の OkHttpClient が6個ある (接続プール・スレッドプールも6組)。タイムアウトも統一されていない | `MoodleClient`、`SsoLogin.probeHttp`、`SyllabusRepository`、`PdfPreviewScreen.kt:196`、`DownloadShareDialog.kt:133`、`FilePreviewScreen.kt:151` | 共通クライアントを1つ作り、用途別の差分は `newBuilder()` で派生する |
 | G12 | 共有・PDF 用ダウンロードは HTML/JSON のエラー応答を検査しない (PDF は `%PDF` 確認のみ)。認証切れのエラーページを「ファイル」として他アプリへ渡し得る。pluginfile の認証エラーは `onAuthError` にも伝わらない | `DownloadShareDialog.kt` の `downloadSharedFile` | `MoodleClient.downloadToFile` と同じ検査 (HTML拒否・リダイレクト先確認) に統一する |
-| G13 | `forumPosts` 内の既読化呼び出しが `runCatching` で CancellationException も握りつぶす | [MoodleRepository.kt:375](app/src/main/java/dev/rits/bettermoodle/data/MoodleRepository.kt:375) | Cancellation を再送出する。既読化は NotificationReadSync と同様にアプリ scope へ |
-| G14 | `configChanges` に `screenLayout|smallestScreenSize|uiMode` がない。折りたたみ端末・分割画面・ダークモード切替で Activity が作り直され、SSO 途中の WebView と passport を失う | [AndroidManifest.xml:30](app/src/main/AndroidManifest.xml:30) | ログイン状態を ViewModel に移す (configChanges を増やすより確実) |
-| G15 | 通知権限をログイン前・起動のたびに要求する | [MainActivity.kt:98](app/src/main/java/dev/rits/bettermoodle/MainActivity.kt:98) | ログイン後、締切画面などで理由を説明してから1回要求する |
-| G16 | `targetSdk = 35`、AGP 8.13 / Kotlin 2.0.21 / Compose BOM 2024.12。Google Play で配布する場合は2026年の target API 要件を満たさない可能性がある | [app/build.gradle.kts:15](app/build.gradle.kts:15) | 安定化後に API 36 と依存を一括更新する (ROADMAP の KMP 移行前に) |
+| G13 | `forumPosts` 内の既読化呼び出しが `runCatching` で CancellationException も握りつぶす | [MoodleRepository.kt:375](../../app/src/main/java/dev/rits/bettermoodle/data/MoodleRepository.kt:375) | Cancellation を再送出する。既読化は NotificationReadSync と同様にアプリ scope へ |
+| G14 | `configChanges` に `screenLayout|smallestScreenSize|uiMode` がない。折りたたみ端末・分割画面・ダークモード切替で Activity が作り直され、SSO 途中の WebView と passport を失う | [AndroidManifest.xml:30](../../app/src/main/AndroidManifest.xml:30) | ログイン状態を ViewModel に移す (configChanges を増やすより確実) |
+| G15 | 通知権限をログイン前・起動のたびに要求する | [MainActivity.kt:98](../../app/src/main/java/dev/rits/bettermoodle/MainActivity.kt:98) | ログイン後、締切画面などで理由を説明してから1回要求する |
+| G16 | `targetSdk = 35`、AGP 8.13 / Kotlin 2.0.21 / Compose BOM 2024.12。Google Play で配布する場合は2026年の target API 要件を満たさない可能性がある | [app/build.gradle.kts:15](../../app/build.gradle.kts:15) | 安定化後に API 36 と依存を一括更新する (ROADMAP の KMP 移行前に) |
 | G17 | 3,000行超の変更が未コミット。監査文書が6個ルートに散在し、テストも `FifthAuditRegressionTest` のように監査回で命名されている | `git status` | 機能単位でコミットする。監査文書は `docs/audits/` へ移し、テストは対象の振る舞いで命名し直す |
 | G18 | コース画面の「シラバス」ボタンは解決中の表示がなく連打で並行要求になる。コース画面だけ `StaleDataBanner` がない | `CourseScreen.kt` | 解決中はボタンを無効化する。他画面と同じバナーを出す |
 
@@ -147,3 +147,30 @@
 
 - 実機での SSO (G01・G08)、Salesforce の clientOutOfSync 応答形式 (G05)、webservice/pluginfile.php の認証エラー応答 (G12) は、大学環境で確認が必要。
 - 過去5回の監査で扱った課題提出の状態機械・通知ルーティングは、今回は再検証していない。
+
+---
+
+## 対応状況 (2026-09-25 実装後)
+
+ブランチ `fix/sixth-audit`。JDK 17 で `testDebugUnitTest lintDebug assembleDebug` が成功した (単体テスト **250件・失敗0**、Lint **エラー0**。警告は既存のもののみ)。実機・大学環境での確認は未実施。
+
+| ID | 状態 | 対応内容 | テスト |
+|---|---|---|---|
+| G01 | 実装済 | プローブも WebView と同じ passport を使う。定期確認を5秒間隔にした | 画面の中の処理なので単体テストなし。**実機でのSSO確認が必要** |
+| G02 | 実装済 | 下書きを `noBackupFilesDir` の暗号化ファイル (Keystore) に保存。所有者は Moodle userid。旧版の SavedStateHandle とトークンハッシュも読んで移行する。明示的なログアウトでは件数を示してから削除 | `DraftStorageTest` (強制ログアウト後の再ログインで復元、別ユーザーは保留扱い、旧形式の移行) |
+| G03 | 実装済 | PARAM_FILE と同じ規則でファイル名を整形し、名前が変わったら通知する | `SubmissionFileInputTest` |
+| G04 | 実装済 | `login()` は保存の成否を返し、失敗時はログイン画面でエラーを表示。読み取り・削除の失敗でもクラッシュしない。appScope に例外ハンドラを付けた | `AuthSessionFailureTest` |
+| G05 | 実装済 | clientOutOfSync を受けたら、応答か検索ページから fwuid を取り直して1回だけ再試行。値は DataStore に保存 | `SyllabusFwuidTest`。**実際の Salesforce の応答形式は未確認** |
+| G06 | 実装済 | コピー前にサイズを確認し、コピー中も上限を超えたら打ち切る | `SubmissionFileInputTest` |
+| G07 | 実装済 | 手動の `recycle()` を削除 | — |
+| G08 | 実装済 | Microsoft の MFA・シームレスSSO 関連ホストを許可。autologin の待ち時間は鍵を発行できたときだけ数え、ログアウトでリセット | 既存の UrlPolicy テスト。**実機でのホスト確認が必要** |
+| G09 | 実装済 | `doUpdateVisitedHistory` で戻る操作を更新。タブを切り替えても WebView の状態を復元 | — |
+| G10 | 実装済 | `openUrl` を1つにまとめ、遷移し終えてから消費済みにする | — |
+| G11 | 実装済 | 共通の `HttpClients.shared` から派生させる | — |
+| G12 | 実装済 | ファイル取得を `MoodleClient.fetchFile` にまとめ、HTML・リダイレクト・Moodle のエラー JSON を拒否。invalidtoken は認証エラーとして通知 | `FileResponseValidationTest` |
+| G13 | 実装済 | キャンセルを再送出する | — |
+| G14 | 実装済 | ログインの途中状態と passport を `rememberSaveable` に保存。`configChanges` に screenLayout/smallestScreenSize を追加 | — |
+| G15 | 実装済 | ログイン後に1回だけ権限を求める | — |
+| G16 | 一部 | compileSdk/targetSdk を 36 にした。AGP・Kotlin・Compose BOM などのライブラリ更新は、ネットワークに接続して別途行う | ビルド・Lint・テスト成功 |
+| G17 | 一部 | 未コミットの変更を機能単位でコミットし、監査文書を `docs/audits/` へ移した。テストクラス名の整理は未実施 | — |
+| G18 | 実装済 | シラバス解決中はボタンを無効にし、更新失敗のバナーを表示 | — |
