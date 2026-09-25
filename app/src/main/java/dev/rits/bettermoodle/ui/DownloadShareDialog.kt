@@ -25,11 +25,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.UrlPolicy
-import dev.rits.bettermoodle.data.useResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import java.io.IOException
 import java.util.Locale
@@ -130,7 +127,6 @@ private fun DownloadProgress(state: DownloadShareState.Downloading) {
     }
 }
 
-private val downloadShareHttp = OkHttpClient()
 private const val MAX_SHARED_FILE_BYTES = 50L * 1024L * 1024L
 private const val DOWNLOAD_PROGRESS_NOTIFY_BYTES = 256L * 1024L
 private const val DOWNLOAD_CACHE_MAX_AGE_MILLIS = 24L * 60L * 60L * 1000L
@@ -159,8 +155,8 @@ private suspend fun downloadSharedFile(
     val out = uniqueDownloadFile(downloadsDir, safeName)
 
     return try {
-        downloadShareHttp.newCall(Request.Builder().url(authed).build()).useResponse { resp ->
-            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+        // 応答の検証 (ログインページ・Moodleのエラー応答をファイルとして渡さない) は共通処理で行う (G12)
+        container.moodleClient.fetchFile(authed, allowHtml = isHtmlFile(safeName, mimeType)) { resp ->
             val body = resp.body ?: throw IOException("空のレスポンスです。")
             val length = body.contentLength().takeIf { it >= 0L }
             if (length != null && length > MAX_SHARED_FILE_BYTES) {
@@ -207,6 +203,13 @@ private suspend fun downloadSharedFile(
         out.delete()
         throw error
     }
+}
+
+/** ファイル自体が HTML か (そのときだけ text/html 応答を受け入れる) */
+private fun isHtmlFile(filename: String, mimeType: String?): Boolean {
+    val mime = mimeType?.substringBefore(';')?.trim()?.lowercase()
+    val name = filename.lowercase()
+    return mime == "text/html" || name.endsWith(".html") || name.endsWith(".htm")
 }
 
 fun openOrShareDownloadedFile(

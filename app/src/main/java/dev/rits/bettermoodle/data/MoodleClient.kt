@@ -17,7 +17,6 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.IOException
 import java.net.URI
-import java.util.concurrent.TimeUnit
 
 /**
  * Moodle Web Service (REST) クライアント。
@@ -39,10 +38,7 @@ class MoodleClient(
     private val onAuthError: (failedToken: String) -> Unit = {},
     httpClient: OkHttpClient? = null,
 ) {
-    private val http = httpClient ?: OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val http = httpClient ?: HttpClients.shared
 
     /** ファイルURLの許可ホスト。siteUrl から導出する (本番は lms.ritsumei.ac.jp) */
     val siteHost: String = runCatching { URI(siteUrl).host }.getOrNull() ?: UrlPolicy.MOODLE_HOST
@@ -175,15 +171,9 @@ class MoodleClient(
         // authedUrl は pluginfile 以外・秘密パラメータ付きURLを拒否する
         val authed = authedUrl(fileUrl) ?: throw IOException("許可されていないファイルURLです。")
         try {
-            return http.newCall(Request.Builder().url(authed).build()).useResponse { resp ->
-                if (!resp.isSuccessful) throw MoodleHttpException(resp.code)
-                val finalPath = resp.request.url.encodedPath
-                if (resp.priorResponse != null && !finalPath.contains("pluginfile.php")) {
-                    throw IOException("ファイルの代わりに別のページ ($finalPath) へリダイレクトされました。")
-                }
+            return fetchFile(authed, allowHtml) { resp ->
                 val body = resp.body ?: throw IOException("空のレスポンス")
                 val contentType = resp.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase()
-                if (contentType == "text/html" && !allowHtml) throw IOException("ファイルの代わりにHTMLが返されました。")
                 var copied = 0L
                 val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                 body.byteStream().use { input ->
@@ -202,6 +192,42 @@ class MoodleClient(
         } catch (e: Throwable) {
             dest.delete()
             throw e
+        }
+    }
+
+    /**
+     * トークン付きのファイルURL ([authedUrl]) を取得し、応答を検証してから [block] に渡す (G12)。
+     * プレビュー・共有・draft 引き継ぎのすべてのファイル取得はここを通す。
+     *
+     * - HTTP エラー、pluginfile 以外へのリダイレクト (ログインページ等) は拒否する
+     * - text/html は、ファイル自体が HTML ([allowHtml]) のときだけ受け入れる
+     * - Moodle のエラー JSON (`errorcode` を持つ) はファイルとして扱わない。invalidtoken なら認証エラーとして通知する
+     */
+    suspend fun <T> fetchFile(authedUrl: String, allowHtml: Boolean, block: (okhttp3.Response) -> T): T =
+        http.newCall(Request.Builder().url(authedUrl).build()).useResponse { resp ->
+            checkFileResponse(resp, allowHtml)
+            block(resp)
+        }
+
+    private fun checkFileResponse(resp: okhttp3.Response, allowHtml: Boolean) {
+        if (!resp.isSuccessful) throw MoodleHttpException(resp.code)
+        val finalPath = resp.request.url.encodedPath
+        if (resp.priorResponse != null && !finalPath.contains("pluginfile.php")) {
+            throw IOException("ファイルの代わりに別のページ ($finalPath) へリダイレクトされました。")
+        }
+        val contentType = resp.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase()
+        if (contentType == "text/html" && !allowHtml) {
+            throw IOException("ファイルの代わりにHTMLが返されました。ログイン状態を確認して再試行してください。")
+        }
+        if (contentType != null && "json" in contentType) {
+            val error = runCatching { json.parseToJsonElement(resp.peekBody(MAX_ERROR_PEEK_BYTES).string()) }
+                .getOrNull() as? JsonObject
+            if (error != null && "errorcode" in error) {
+                val ws = runCatching { json.decodeFromJsonElement(WsError.serializer(), error) }.getOrNull()
+                val usedToken = generateSequence(resp) { it.priorResponse }.last().request.url.queryParameter("token")
+                if (ws?.errorcode in AUTH_ERROR_CODES && usedToken != null) onAuthError(usedToken)
+                throw MoodleWsException(ws?.errorcode, ws?.message ?: "ファイルを取得できませんでした")
+            }
         }
     }
 
@@ -225,6 +251,7 @@ class MoodleClient(
         const val SITE_URL = "https://lms.ritsumei.ac.jp"
         const val LAUNCH_URL = "$SITE_URL/admin/tool/mobile/launch.php"
         const val URL_SCHEME = "bettermoodle"
+        private const val MAX_ERROR_PEEK_BYTES = 64L * 1024L
 
         // Keep this narrow: network failures, 5xx, parse errors, and access-policy
         // errors must not clear the saved Moodle token.

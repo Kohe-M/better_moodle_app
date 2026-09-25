@@ -33,11 +33,8 @@ import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.PreviewKind
 import dev.rits.bettermoodle.data.UrlPolicy
-import dev.rits.bettermoodle.data.useResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.ByteArrayOutputStream
 
 private sealed interface FilePreviewState {
@@ -145,7 +142,6 @@ private fun previewShareMimeType(kind: PreviewKind): String? =
         else -> null
     }
 
-private val filePreviewHttp = OkHttpClient()
 private const val MAX_IMAGE_BYTES = 10L * 1024L * 1024L
 private const val MAX_TEXT_BYTES = 1024L * 1024L
 private const val MAX_IMAGE_PIXELS = 4_000_000
@@ -187,12 +183,8 @@ internal suspend fun downloadPreviewBytes(
         throw java.io.IOException("許可されていないファイルURLです。")
     }
     // 画面離脱で本文読み取りも中断する
-    return filePreviewHttp.newCall(Request.Builder().url(authed).build()).useResponse { resp ->
-        if (!resp.isSuccessful) throw java.io.IOException("HTTP ${resp.code}")
-        val contentType = resp.header("Content-Type").orEmpty().lowercase()
-        if (rejectHtml && contentType.contains("text/html")) {
-            throw java.io.IOException("HTMLレスポンスはプレビューできません。")
-        }
+    // 応答の検証 (ログインページ・Moodleのエラー応答の拒否) は共通処理で行う (G12)
+    return container.moodleClient.fetchFile(authed, allowHtml = !rejectHtml) { resp ->
         val body = resp.body ?: throw java.io.IOException("空のレスポンスです。")
         val length = body.contentLength()
         if (length > maxBytes) throw java.io.IOException("ファイルが大きすぎます。")

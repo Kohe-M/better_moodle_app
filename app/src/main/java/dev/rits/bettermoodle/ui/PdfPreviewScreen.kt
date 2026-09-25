@@ -39,12 +39,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.UrlPolicy
-import dev.rits.bettermoodle.data.useResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import kotlin.math.sqrt
 
@@ -90,7 +87,7 @@ fun PdfPreviewScreen(
                 if (!UrlPolicy.isAllowedMoodlePluginFileUrl(authed)) {
                     throw java.io.IOException("許可されていないPDF URLです")
                 }
-                val file = downloadToCache(context.cacheDir, authed)
+                val file = downloadToCache(container, context.cacheDir, authed)
                 runCatching { inspectPdf(file) }
                     .getOrElse {
                         file.delete()
@@ -193,19 +190,17 @@ fun PdfPreviewScreen(
     }
 }
 
-private val downloadHttp = OkHttpClient()
 private const val MAX_PDF_BYTES = 30L * 1024L * 1024L
 private const val MAX_BITMAP_PIXELS = 4_000_000
 private const val PREVIEW_CACHE_MAX_AGE_MILLIS = 24L * 60L * 60L * 1000L
 
-private suspend fun downloadToCache(cacheDir: File, url: String): File {
+private suspend fun downloadToCache(container: AppContainer, cacheDir: File, url: String): File {
     cleanupOldPreviewPdfs(cacheDir)
     val tmp = File.createTempFile("preview_", ".tmp", cacheDir)
     val out = File.createTempFile("preview_", ".pdf", cacheDir).also { it.delete() }
     // 画面離脱でダウンロードを中断し、一時ファイルを残さない
     return try {
-        downloadHttp.newCall(Request.Builder().url(url).build()).useResponse { resp ->
-            if (!resp.isSuccessful) throw java.io.IOException("HTTP ${resp.code}")
+        container.moodleClient.fetchFile(url, allowHtml = false) { resp ->
             val body = resp.body ?: throw java.io.IOException("空のレスポンス")
             val length = body.contentLength()
             if (length > MAX_PDF_BYTES) throw java.io.IOException("PDFが大きすぎます")

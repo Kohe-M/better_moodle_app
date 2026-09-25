@@ -41,7 +41,7 @@ object SsoLogin {
         }
 
     private val probeHttp by lazy {
-        okhttp3.OkHttpClient.Builder()
+        dev.rits.bettermoodle.data.HttpClients.shared.newBuilder()
             .followRedirects(false)
             .followSslRedirects(false)
             .build()

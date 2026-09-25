@@ -16,7 +16,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.coroutines.CancellationException
 import okhttp3.FormBody
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
@@ -81,7 +80,7 @@ class SyllabusRepository(
     private val store: SyllabusUrlCache,
     private val baseUrl: String = SYLLABUS_BASE,
 ) {
-    private val http = OkHttpClient.Builder()
+    private val http = HttpClients.shared.newBuilder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
