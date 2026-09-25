@@ -11,8 +11,9 @@ better_moodle_app を Kotlin Multiplatform 化して iOS に対応させるた�
 
 ## 現状分析 (2026-07 時点)
 
-単一 `app` モジュール、約7,800行。手動DI (`AppContainer`)、ViewModelなし
-(`rememberLoadable` + `LoadableMemoryCache` によるComposable内ロード)。
+単一 `app` モジュール、約7,800行。手動DI (`AppContainer`)、ViewModelは課題画面のみ
+(`AssignmentViewModel` → 純Kotlinの `AssignmentEditor`)。他は `rememberLoadable` + `LoadableMemoryCache`
+によるComposable内ロード。
 
 ### すでにKMP互換 (純Kotlin + kotlinx.serialization、テスト済み)
 
@@ -25,10 +26,12 @@ better_moodle_app を Kotlin Multiplatform 化して iOS に対応させるた�
 | `data/ActionEventRouting.kt` / `ForumRouting.kt` / `QuizRouting.kt` | イベント→画面ルーティング判定 |
 | `data/CourseModuleGrouping.kt` | セクション整形 |
 | `data/QuizUiModels.kt` | クイズ表示ロジック |
+| `data/AssignmentEditor.kt` / `AssignmentFileDraft.kt` / `OnlineTextFormat.kt` | 課題提出の状態機械・draft組み立て・テキスト⇔HTML契約 (`AssignmentGateway` で I/O を分離済み。`OnlineTextFormat` は jsoup → Ksoup) |
+| `data/AuthSession.kt` / `NotificationReadSync.kt` | セッション境界と既読同期 (`AuthTokenStore` で永続化を分離済み) |
 | `ui/LoadState.kt` の `LoadableMemoryCache` | メモリキャッシュ (Composable部分は除く) |
 
-対応する単体テスト (`ActionEventRoutingTest`, `CourseModuleGroupingTest`, `TimetableParserTest` 等) も
-`commonTest` へ移動できる。**このテスト群が移行全体の安全網になる。**
+対応する単体テスト (`ActionEventRoutingTest`, `CourseModuleGroupingTest`, `TimetableParserTest`, `AssignmentEditorTest` 等) も
+`commonTest` へ移動できる (`MockWebServer` を使う契約テストは Ktor MockEngine へ置き換え)。**このテスト群が移行全体の安全網になる。**
 
 ### KMP非互換な依存と置き換え先
 
@@ -52,16 +55,23 @@ better_moodle_app を Kotlin Multiplatform 化して iOS に対応させるた�
 ## Phase 0: Android版の安定化と移行準備
 
 KMP化前にAndroid内で土台を固める。**全作業Windowsで完結。**
+詳細な問題点と完了条件は [PROJECT_REVIEW.md](PROJECT_REVIEW.md) (F01–F16) を正とする。
 
-1. **CIの整備**: GitHub Actions で `assembleDebug` + `testDebugUnitTest` を全push時に実行。
-   移行中のリグレッション検出装置として必須。
-2. **ツールチェーン更新**: Kotlin 2.0.21 → 最新stable (2.2.x)、AGP・Compose BOM追随。
-   Track A の場合は Compose Multiplatform の対応バージョンに合わせる。
-3. **残バグのクローズ** (README「次のステップ」より、任意だが推奨):
-   - `rutime_table` 実アカウントでの時間割解析検証
-   - 通知の既読同期 (`core_message_mark_notification_read`)
+1. **CIの整備** (済): GitHub Actions で `testDebugUnitTest` + `lintDebug` + `assembleDebug` を全push/PRで実行。
+2. **提出フローの修復** (実装・JVMテスト済、結合・実機未): `assignmentid` 契約、通常/制限時間付き課題の区別、warning判定、
+   既存ファイルをパス付きで引き継ぐdraft組み立てと保存後照合、結果不明 (`PendingWrite`) の照会、草稿保護 (`AssignmentEditor` + ViewModel)。
+   MockWebServer契約テスト (draft組み立てを含む) と草稿状態テストで固定。
+3. **データ・セッション整合** (実装・JVMテスト済、端末未): 更新失敗の可視化 (`StaleDataBanner`)、`AuthSession` による
+   ログイン/ログアウト/認証エラーの直列化、イベント/通知の追加読込と不完全 (End/More/Incomplete) の区別、
+   通知タップからの遷移 (二重消費防止) と既読同期 (`NotificationReadSync`)。
+4. **閲覧・通信** (実装済、実機未): ACTION_VIEW優先の外部起動、「Moodleで開く」導線、シラバス失敗理由の区別、
+   本文読み取りまで中断できるHTTP (`Call.useResponse`、全経路)、WebViewの破棄・エラー復旧・SSO戻る/タイムアウト。
+5. **実機受入** (未): PROJECT_REVIEW.md のチェックリストを実端末・テスト用課題で通す。
+6. **ツールチェーン更新** (未): Kotlin 2.0.21 → 最新stable、AGP・Compose BOM追随。
+   一括更新はせず互換性を確認しながら段階的に。Track A の場合は Compose Multiplatform 対応版に合わせる。
+7. **残項目** (未): `rutime_table` 実HTMLでの解析検証、閲覧完了APIの実装、フォーラムのBack整合、PDF巨大ページ対策。
 
-**DoD**: CIがグリーン。実機でログイン→時間割→締切→課題提出が通る。
+**DoD**: CIがグリーン (ローカルでは達成、GitHub上の実行実績は未)。実機でログイン→時間割→締切→課題提出 (既存A+追加B保持) が通る (未達)。
 
 ## Phase 1: appモジュール内でのKMP互換化 (リスク最小の下準備)
 

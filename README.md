@@ -14,18 +14,20 @@
 | シラバス | 履修中コース一覧から1タップでシラバスを開く。授業コード直接入力も可 |
 | ポータル | スチューデントポータル (sp.ritsumei.ac.jp) をアプリ内WebViewで表示。Microsoft SSOのセッションは永続化 |
 
-さらに **WorkManager** が6時間ごとに締切をチェックし、24時間以内に迫った課題をローカル通知する。
+さらに **WorkManager** が6時間ごとに締切をチェックし、24時間以内に迫った課題をローカル通知する
+(ページ上限やサーバー応答の異常で 24 時間分を取り切れなかった場合は取得できた分だけ通知し、通知済み記録は削らない)。
 
 ## ビルドと実行
 
 Android Studio でこのフォルダを開いて Run するだけ。CLIの場合:
 
 ```
-JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" ./gradlew assembleDebug
+JAVA_HOME="C:/Program Files/Java/jdk-17" ./gradlew assembleDebug
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-- minSdk 26 / targetSdk 35 / Kotlin 2.0 + Jetpack Compose (Material 3)
+- **JDK 17 が必要** (CI と同じ)。Android Studio 同梱 JBR が Java 25 の環境では Gradle 8.13 が起動時に失敗する
+- AGP 8.13.2 / Gradle 8.13 / minSdk 26 / targetSdk 35 / Kotlin 2.0 + Jetpack Compose (Material 3)
 - DIフレームワークなし (`AppContainer` による手動DI)、DB なし (DataStore のみ) の軽量構成
 
 ## アーキテクチャと調査結果
@@ -48,7 +50,15 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 | `core_block_get_dashboard_blocks` (`returncontents=1`) | **時間割**: カスタムブロック `rutime_table` のHTMLを取得し jsoup で解析 |
 | `core_calendar_get_action_events_by_timesort` | **締切**: 公式アプリのタイムラインと同じAPI。`assign`/`quiz` 等でフィルタ |
 | `message_popup_get_popup_notifications` | 通知一覧 |
-| `core_course_get_enrolled_courses_by_timeline_classification` | 履修中コース一覧 (シラバス画面) |
+| `core_course_get_enrolled_courses_by_timeline_classification` | コース一覧 (シラバス画面は進行中のみ、「すべてのコース」は進行中/今後/過去/すべてを切替) |
+| `core_course_get_contents` / `core_course_get_course_module` | コース内容とURL→ネイティブ画面の解決 |
+| `mod_assign_get_assignments` / `mod_assign_get_submission_status` | 課題の表示 (`assignid` 引数) |
+| `mod_assign_save_submission` / `mod_assign_submit_for_grading` | 文章・ファイルの保存と最終提出 (**`assignmentid` 引数**。warning応答は失敗扱い) |
+| `mod_assign_start_submission` | 制限時間付き課題の計測開始のみ (通常課題では呼ばない) |
+| `core_files_get_unused_draft_itemid` + `webservice/upload.php` | ファイル提出のdraft領域を「既存+追加」の全体集合で組み立てる (追加が置換にならないように)。既存は `(filepath, filename)` で識別し同じパスへ再アップロード |
+| `mod_quiz_*` / `mod_forum_*` / `mod_page_get_pages_by_courses` | 小テスト・フォーラム・ページ教材のネイティブ表示 |
+| `core_message_mark_notification_read` | 通知を開いたときの既読同期 |
+| `tool_mobile_get_autologin_key` | WebViewで開くときの自動ログイン |
 
 時間割ブロックのDOM構造 (`table.timetable`, `td.time`, `.subject`) は
 [Moodle-Schedule-Extension](https://github.com/mutyuki/Moodle-Schedule-Extension) の解析結果に基づく。
@@ -78,13 +88,24 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 MVPではWebView統合とし、CookieManagerでセッションを永続化。
 API化する場合はWebViewのセッションCookie (`sid`) を使って `sfsites/aura` を呼ぶ方式が考えられる。
 
+### 課題提出の扱い (対応 / 未対応 / 未検証)
+
+| 状態 | 内容 |
+|---|---|
+| 対応 (単体テストまで) | 通常課題の文章 (プレーンテキスト→HTML) 保存、ファイル追加・削除 (既存ファイルをパス付きで引き継ぎ、保存後に一覧とサイズを照合)、最終提出、提出確認文の表示。未保存草稿の離脱・再読込確認、プロセス再生成後の草稿復元。保存前にサーバー本文を再照会し、Web 側の変更 (書式追加・権限変更を含む) があれば上書きせず停止。応答が返らなかった書き込み・成功応答後に照会だけ失敗した書き込み・照会しても未反映の書き込みは「結果未確認」として保持し、適用確認か利用者の明示的な解除まで再送しない。草稿は本文の基準値・競合状態と一緒に保存され、プロセス再生成後も Web 側の変更を上書きしない |
+| Webへ誘導 | グループ提出、書式付き (画像・表・リンク) の既存文章の編集、Web Serviceで取得できない課題。各画面の「Moodleで開く」から常時WebViewへ抜けられる |
+| 制限付き対応 | 制限時間付き課題は確認ダイアログ後に開始APIを呼ぶ。残り時間の表示はなし |
+| 未検証 | 大学サーバー (Moodle 4.x 想定) の実応答での提出。テストは `MockWebServer` による契約テスト (draft 組み立てを含む) と草稿状態・認証競合・キャンセルの JVM テストまで。同名・同サイズで内容だけ違う置換はサイズ比較では検出できない |
+
 ## 既知の制約・次のステップ
 
 - [ ] `rutime_table` ブロックの実際のHTMLでの時間割解析検証 (実アカウントでの動作確認が必要。取得できない場合はエラー表示にフォールバック)
 - [x] シラバスresolverの自前化 (Aura API直接呼び出しのみ。外部Worker fallbackなし)
 - [ ] ポータルのネイティブ化 (休講情報などの抽出)
-- [ ] 通知の既読同期 (`core_message_mark_notification_read`)
+- [x] 通知の既読同期 (`core_message_mark_notification_read`)
 - [x] Moodle Web Service token のAndroid Keystore暗号化保存
+- [x] CI (GitHub Actions: 単体テスト・Lint・assembleDebug)
+- [ ] 実機での受入テスト ([PROJECT_REVIEW.md](PROJECT_REVIEW.md) のチェックリスト)
 - [ ] Google Play 配信するなら大学への確認を推奨 (非公式ツールのため)
 
 ## 免責
