@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +48,9 @@ import androidx.compose.material.icons.filled.School
 
 private const val LOGIN_POLLING_TIMEOUT_MILLIS = 10 * 60 * 1000L
 
+/** SSO中の launch.php 定期確認の間隔。主経路は「lmsへ戻ったときの確認」で、これは補助 (サーバー負荷を抑える) */
+private const val LOGIN_POLLING_INTERVAL_MILLIS = 5_000L
+
 /** Logcat用 (DEBUGのみ): スキーム+ホスト+パスのみ。クエリ・フラグメントは出さない。 */
 private fun loginDebugUrlLabel(url: String): String {
     val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return "(unparseable)"
@@ -65,59 +69,73 @@ private fun loginDebugUrlLabel(url: String): String {
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
-    var showWebView by remember { mutableStateOf(false) }
+fun LoginScreen(onToken: suspend (SsoLogin.Tokens) -> Boolean) {
+    // 画面の作り直し (折りたたみ・分割画面など) で SSO の途中状態と passport を失わないよう保存する (G14)
+    var showWebView by rememberSaveable { mutableStateOf(false) }
     var showManual by remember { mutableStateOf(false) }
     var manualToken by remember { mutableStateOf("") }
-    var loginError by remember { mutableStateOf<String?>(null) }
+    var loginError by rememberSaveable { mutableStateOf<String?>(null) }
     var probing by remember { mutableStateOf(false) }
     var tokenDelivered by remember { mutableStateOf(false) }
-    val passport = remember { SsoLogin.newPassport() }
+    val passport = rememberSaveable { SsoLogin.newPassport() }
     val scope = rememberCoroutineScope()
 
+    /** トークンを保存する。保存に失敗したら受け取り済みを戻してエラーを出す (やり直せるように。G04) */
     fun deliverTokens(tokens: SsoLogin.Tokens) {
         if (tokenDelivered) return
         tokenDelivered = true
-        onToken(tokens)
+        scope.launch {
+            if (!onToken(tokens)) {
+                tokenDelivered = false
+                loginError = "ログイン情報を端末に保存できませんでした。もう一度お試しください。"
+            }
+        }
     }
 
     // WebViewを経由せずlaunch.phpのLocationヘッダからトークンを直接取得する。
     // セッションCookieが無ければnull (通常のWebView SSOへ)。
+    // WebViewと同じ passport を使う: 未ログインの launch.php は Moodle セッションの戻り先 (wantsurl) を
+    // 自分のURLで上書きするため、別の passport だと SSO 完了後に WebView へ届くトークンの署名が
+    // 合わなくなる (G01)
     suspend fun probeLaunchToken(): SsoLogin.Tokens? = withContext(Dispatchers.IO) {
         val cookies = runCatching {
             CookieManager.getInstance().getCookie(MoodleClient.SITE_URL)
         }.getOrNull()
-        SsoLogin.fetchTokenByProbe(SsoLogin.newPassport(), cookies)
+        SsoLogin.fetchTokenByProbe(passport, cookies)
+    }
+
+    val error = loginError
+    if (error != null) {
+        BackHandler {
+            loginError = null
+            showWebView = false
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(error, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    loginError = null
+                    showWebView = false
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("やり直す")
+            }
+        }
+        return
     }
 
     if (showWebView) {
         // SSO途中の戻る操作はログインの入口へ戻す (WebViewの履歴を辿らせない)
         BackHandler {
-            loginError = null
             showWebView = false
-        }
-        val error = loginError
-        if (error != null) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(error, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-                Spacer(Modifier.height(16.dp))
-                Button(
-                    onClick = {
-                        loginError = null
-                        showWebView = false
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("やり直す")
-                }
-            }
-            return
         }
         // WebViewはカスタムスキームへの302を「どのコールバックも呼ばずに」破棄することが
         // あり (KMSI後のPOSTリダイレクト連鎖など)、その場合ページイベントが一切来ない。
@@ -134,7 +152,7 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                     deliverTokens(tokens)
                     break
                 }
-                delay(1500)
+                delay(LOGIN_POLLING_INTERVAL_MILLIS)
             }
             // 黙って終わらせず、タイムアウトしたことを知らせてやり直せるようにする
             if (!tokenDelivered && loginError == null &&
@@ -301,7 +319,7 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                 Button(
                     onClick = {
                         if (manualToken.isNotBlank()) {
-                            onToken(SsoLogin.Tokens(manualToken.trim(), null))
+                            deliverTokens(SsoLogin.Tokens(manualToken.trim(), null))
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),

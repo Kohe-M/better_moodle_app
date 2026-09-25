@@ -21,6 +21,7 @@ import dev.rits.bettermoodle.data.SessionStore
 import dev.rits.bettermoodle.data.SyllabusRepository
 import dev.rits.bettermoodle.ui.LoadableMemoryCache
 import dev.rits.bettermoodle.work.DeadlineWorker
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -81,7 +82,11 @@ class App : Application() {
 data class PendingDeepLink(val url: String, val title: String, val key: String, val explicit: Boolean)
 
 class AppContainer(private val app: Application) {
-    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** 未捕捉の例外でプロセスを落とさない最終防衛 (個々の処理は自分で失敗を扱う。G04) */
+    private val exceptionHandler = CoroutineExceptionHandler { _, error ->
+        android.util.Log.e("AppScope", "unhandled error in app scope", error)
+    }
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
     val sessionStore = SessionStore(app)
 
     /** セッション境界の唯一の所有者。ログイン/ログアウト/認証エラーはここを通す。 */

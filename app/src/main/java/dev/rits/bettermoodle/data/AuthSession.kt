@@ -1,11 +1,14 @@
 package dev.rits.bettermoodle.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -73,14 +76,30 @@ class AuthSession(
      * その前に発行されていた旧トークンの通知が遅れて処理されても再ログイン状態にならない)。
      */
     fun start(): Job = scope.launch {
-        store.tokenFlow.collect { mutex.withLock { applyTokenLocked(store.token()) } }
+        try {
+            store.tokenFlow.collect { mutex.withLock { applyTokenLocked(readTokenOrNull()) } }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // 保存領域 (DataStore) が読めない場合もクラッシュさせず、未ログインとして扱う (G04)
+            mutex.withLock { applyTokenLocked(null) }
+        }
     }
 
-    /** 永続化と状態更新を同じ排他区間で行う (保存直後に旧 invalidtoken が届いても消されない) */
-    fun login(token: String, privateToken: String?): Job = scope.launch(NonCancellable) {
+    /**
+     * 永続化と状態更新を同じ排他区間で行う (保存直後に旧 invalidtoken が届いても消されない)。
+     * 保存に失敗した場合 (Keystore・DataStore の障害) は例外を投げずに false を返す (G04)。
+     * 呼び出し側はログイン画面でエラーを表示し、やり直せるようにする。
+     */
+    fun login(token: String, privateToken: String?): Deferred<Boolean> = scope.async(NonCancellable) {
         mutex.withLock {
-            store.saveLogin(token, privateToken)
+            try {
+                store.saveLogin(token, privateToken)
+            } catch (e: Exception) {
+                return@withLock false
+            }
             applyTokenLocked(token)
+            true
         }
     }
 
@@ -104,6 +123,16 @@ class AuthSession(
         mutex.withLock { applyTokenLocked(store.token()) }
     }
 
+    /** 読み取り失敗は未ログインとして扱う (保存済みの値は消さない) */
+    private suspend fun readTokenOrNull(): String? =
+        try {
+            store.token()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+
     /**
      * 世代 [generation] のセッションが現在も有効なときだけ [block] を実行する。
      * ログイン/ログアウト/認証消去と同じ Mutex を取るので、block の実行中にセッション境界が
@@ -119,6 +148,8 @@ class AuthSession(
         currentToken = null
         try {
             if (clearAll) store.logout() else store.clearAuthTokens()
+        } catch (e: Exception) {
+            // 永続化の削除に失敗してもメモリ上はログアウトを完了させる (クラッシュさせない。G04)
         } finally {
             runCatching { onSessionCleared() }
             applyTokenLocked(null)

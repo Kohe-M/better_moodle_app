@@ -157,7 +157,7 @@ private fun Root(container: AppContainer) {
         AuthState.LoggedOut -> {
             // 永続化と状態更新はセッション管理側 (アプリ scope) が排他して行う
             LoginScreen(onToken = { tokens: SsoLogin.Tokens ->
-                container.authSession.login(tokens.wsToken, tokens.privateToken)
+                container.authSession.login(tokens.wsToken, tokens.privateToken).await()
             })
             return
         }
