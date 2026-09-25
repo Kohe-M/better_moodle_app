@@ -1,6 +1,7 @@
 package dev.rits.bettermoodle.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -35,6 +36,7 @@ class SessionStore(private val context: Context) : AuthTokenStore, SyllabusUrlCa
         val DEADLINE_CURSOR_AFTER = longPreferencesKey("deadline_cursor_after")
         val USER_ID = longPreferencesKey("moodle_user_id")
         val AURA_FWUID = stringPreferencesKey("syllabus_aura_fwuid")
+        val NOTIFICATION_PERMISSION_ASKED = booleanPreferencesKey("notification_permission_asked")
         val USER_ID_TOKEN_HASH = stringPreferencesKey("moodle_user_id_token_hash")
     }
 
@@ -166,6 +168,13 @@ class SessionStore(private val context: Context) : AuthTokenStore, SyllabusUrlCa
 
     override suspend fun saveAuraFwuid(fwuid: String) {
         context.dataStore.edit { it[Keys.AURA_FWUID] = fwuid }
+    }
+
+    suspend fun notificationPermissionAsked(): Boolean =
+        context.dataStore.data.first()[Keys.NOTIFICATION_PERMISSION_ASKED] == true
+
+    suspend fun markNotificationPermissionAsked() {
+        context.dataStore.edit { it[Keys.NOTIFICATION_PERMISSION_ASKED] = true }
     }
 
     /** 消費済みの通知宛先キー (プロセス再生成後に同じ Intent を二重に処理しないため) */

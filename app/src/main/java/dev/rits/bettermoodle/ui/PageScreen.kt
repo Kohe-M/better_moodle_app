@@ -26,7 +26,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -278,9 +277,7 @@ private fun PageInlineImage(container: AppContainer, src: String) {
             style = MaterialTheme.typography.bodySmall,
         )
         is InlineImageState.Ready -> {
-            DisposableEffect(s.bitmap) {
-                onDispose { s.bitmap.recycle() }
-            }
+            // recycle() しない: 破棄と同じフレームで描画されるとクラッシュする。参照が切れれば GC が解放する (G07)
             Image(
                 bitmap = s.bitmap.asImageBitmap(),
                 contentDescription = "ページ内の画像",

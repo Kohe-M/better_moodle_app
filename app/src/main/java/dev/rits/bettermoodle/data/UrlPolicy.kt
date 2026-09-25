@@ -14,6 +14,12 @@ object UrlPolicy {
         "aadcdn.msauth.net",
         "aadcdn.msftauth.net",
         "secure.aadcdn.microsoftonline-p.com",
+        // MFA・シームレスSSO・デバイス登録・認証方法の登録で経由する (G08)
+        "login.microsoft.com",
+        "device.login.microsoftonline.com",
+        "autologon.microsoftazuread-sso.com",
+        "mysignins.microsoft.com",
+        "account.activedirectory.windowsazure.com",
     )
 
     fun isHttpsUrl(url: String): Boolean =

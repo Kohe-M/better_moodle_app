@@ -293,9 +293,7 @@ private fun PdfPage(file: File, pageIndex: Int, totalPages: Int) {
                     .padding(24.dp),
             )
             is PdfPageState.Ready -> {
-                DisposableEffect(state.bitmap) {
-                    onDispose { state.bitmap.recycle() }
-                }
+                // recycle() しない: 破棄と同じフレームで描画されるとクラッシュする。参照が切れれば GC が解放する (G07)
                 Image(
                     bitmap = state.bitmap.asImageBitmap(),
                     contentDescription = "ページ ${pageIndex + 1}",

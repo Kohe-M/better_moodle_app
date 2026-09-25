@@ -169,6 +169,7 @@ class AppContainer(private val app: Application) {
         LoadableMemoryCache.clear()
         pendingDeepLink.value = null
         notificationReadSync.clear()
+        moodleRepository.resetAutologinThrottle()
         runCatching { NotificationManagerCompat.from(app).cancelAll() }
         clearAllWebSessions()
     }

@@ -1,6 +1,7 @@
 package dev.rits.bettermoodle.ui
 
 import android.annotation.SuppressLint
+import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -19,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
@@ -36,6 +38,9 @@ fun PortalScreen(clearSessionTick: Int = 0) {
     var loading by remember { mutableStateOf(true) }
     var mainFrameError by remember { mutableStateOf<MainFrameError?>(null) }
     var observedClearSessionTick by remember { mutableIntStateOf(clearSessionTick) }
+    // タブを切り替えて戻ったときに履歴と表示中のページを復元する (G09)。
+    // 下部タブの NavHost が saveState/restoreState するので、この Bundle も保持される
+    val webState = rememberSaveable { Bundle() }
     val context = LocalContext.current
 
     BackHandler(enabled = canGoBack) {
@@ -46,6 +51,7 @@ fun PortalScreen(clearSessionTick: Int = 0) {
         if (clearSessionTick != observedClearSessionTick) {
             observedClearSessionTick = clearSessionTick
             webView?.clearCache(true)
+            webState.clear()
             webView?.loadUrl(PORTAL_URL)
         }
     }
@@ -55,6 +61,8 @@ fun PortalScreen(clearSessionTick: Int = 0) {
         modifier = Modifier.fillMaxSize(),
         onRelease = { view ->
             if (webView === view) webView = null
+            webState.clear()
+            view.saveState(webState)
             releaseWebView(view)
         },
         factory = { context ->
@@ -89,6 +97,12 @@ fun PortalScreen(clearSessionTick: Int = 0) {
                         CookieManager.getInstance().flush()
                     }
 
+                    // ポータル (Salesforce Lightning) は history API で画面を切り替え、onPageFinished が来ない。
+                    // 履歴の更新ごとに戻る操作の可否を反映する (G09)
+                    override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                        canGoBack = view?.canGoBack() == true
+                    }
+
                     override fun onReceivedError(
                         view: WebView?,
                         request: WebResourceRequest?,
@@ -111,7 +125,9 @@ fun PortalScreen(clearSessionTick: Int = 0) {
                         }
                     }
                 }
-                loadUrl(PORTAL_URL)
+                val restored = !webState.isEmpty && restoreState(webState) != null
+                if (!restored) loadUrl(PORTAL_URL)
+                canGoBack = canGoBack()
                 webView = this
             }
         },

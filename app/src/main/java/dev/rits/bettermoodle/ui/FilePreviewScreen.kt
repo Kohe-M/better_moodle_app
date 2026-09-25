@@ -21,7 +21,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -110,9 +109,7 @@ fun FilePreviewScreen(
                 style = MaterialTheme.typography.bodyMedium,
             )
             is FilePreviewState.ImageReady -> {
-                DisposableEffect(s.bitmap) {
-                    onDispose { s.bitmap.recycle() }
-                }
+                // recycle() しない: 破棄と同じフレームで描画されるとクラッシュする。参照が切れれば GC が解放する (G07)
                 Column(
                     modifier = Modifier
                         .fillMaxSize()

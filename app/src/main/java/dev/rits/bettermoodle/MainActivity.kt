@@ -3,12 +3,14 @@ package dev.rits.bettermoodle
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
@@ -48,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -89,14 +92,8 @@ import java.net.URI
 
 class MainActivity : ComponentActivity() {
 
-    private val notificationPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= 33) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
         val container = (application as App).container
         // cold start・プロセス再生成・既存Activityへの onNewIntent のどれでも同じ経路で宛先を保持し、
         // ログイン後に Root が消費する。savedInstanceState がある = プロセス再生成による再配達なので、
@@ -175,24 +172,38 @@ private fun LoggedInRoot(container: AppContainer) {
 
     // 下書きの所有者判定に使う Moodle ユーザーIDを、通信できるうちに取得・保存しておく (G02)
     LaunchedEffect(Unit) { container.currentAccount() }
+
+    // 締切通知の権限はログイン後に1回だけ求める (起動のたび・ログイン前には出さない。G15)
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT < 33) return@LaunchedEffect
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted || container.sessionStore.notificationPermissionAsked()) return@LaunchedEffect
+        container.sessionStore.markNotificationPermissionAsked()
+        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
     /**
      * URLをネイティブ画面/WebView/外部ブラウザへ振り分ける。
      * [fromUser] が false (通知タップ等) のときは遷移アニメーション中のガードを通さない
      * (cold start 直後はまだ RESUMED でないため、ガードすると宛先が捨てられる)。
      */
-    fun openUrl(url: String, title: String, fromUser: Boolean = true) {
+    suspend fun openUrlNow(url: String, title: String, fromUser: Boolean) {
         val normalized = UrlPolicy.normalizeMoodleUrl(url)
-        scope.launch {
-            val nativeRoute = pluginFileRoute(normalized, title) ?: resolveNativeRoute(container, normalized, title)
-            val go: (String) -> Unit = { route -> if (fromUser) rootNav.navigateFromUser(route) else rootNav.navigate(route) }
-            when {
-                nativeRoute != null -> go(nativeRoute)
-                UrlPolicy.isAllowedMoodleWebViewUrl(normalized) ->
-                    go("moodleWeb?url=${Uri.encode(normalized)}&title=${Uri.encode(title)}")
-                UrlPolicy.canOpenExternally(normalized) -> openInCustomTab(context, normalized)
-                else -> showUnhandledUrl(context, normalized)
-            }
+        val nativeRoute = pluginFileRoute(normalized, title) ?: resolveNativeRoute(container, normalized, title)
+        val go: (String) -> Unit = { route -> if (fromUser) rootNav.navigateFromUser(route) else rootNav.navigate(route) }
+        when {
+            nativeRoute != null -> go(nativeRoute)
+            UrlPolicy.isAllowedMoodleWebViewUrl(normalized) ->
+                go("moodleWeb?url=${Uri.encode(normalized)}&title=${Uri.encode(title)}")
+            UrlPolicy.canOpenExternally(normalized) -> openInCustomTab(context, normalized)
+            else -> showUnhandledUrl(context, normalized)
         }
+    }
+
+    /** 画面からのURLを開く (全画面共通の入口。G10) */
+    fun openUrl(url: String, title: String) {
+        scope.launch { openUrlNow(url, title, fromUser = true) }
     }
 
     // 通知タップなどの宛先はログイン後に消費する。
@@ -205,14 +216,15 @@ private fun LoggedInRoot(container: AppContainer) {
         val link = pendingLink ?: return@LaunchedEffect
         val redelivered = !link.explicit && container.sessionStore.consumedDeepLinkKey() == link.key
         if (!redelivered) {
-            openUrl(link.url, link.title, fromUser = false)
+            // 遷移し終えてから消費済みにする (通信中に中断されたら、再配達で開き直せるように。G10)
+            openUrlNow(link.url, link.title, fromUser = false)
             container.sessionStore.markDeepLinkConsumed(link.key)
         }
         container.pendingDeepLink.compareAndSet(link, null)
     }
 
     NavHost(navController = rootNav, startDestination = "main") {
-        composable("main") { MainTabs(container, rootNav) }
+        composable("main") { MainTabs(container, rootNav, onOpenUrl = ::openUrl) }
 
         composable("courses") {
             CourseListScreen(
@@ -602,7 +614,11 @@ private fun debugUrlLabel(url: String): String {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
+private fun MainTabs(
+    container: AppContainer,
+    rootNav: NavHostController,
+    onOpenUrl: (url: String, title: String) -> Unit,
+) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var showLogout by remember { mutableStateOf(false) }
@@ -622,20 +638,6 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
 
     fun openCourse(id: Long, name: String, code: String?) {
         rootNav.navigateFromUser(courseRoute(id, name, code))
-    }
-
-    fun openUrl(url: String, title: String) {
-        val normalized = UrlPolicy.normalizeMoodleUrl(url)
-        scope.launch {
-            val nativeRoute = pluginFileRoute(normalized, title) ?: resolveNativeRoute(container, normalized, title)
-            when {
-                nativeRoute != null -> rootNav.navigateFromUser(nativeRoute)
-                UrlPolicy.isAllowedMoodleWebViewUrl(normalized) ->
-                    rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(normalized)}&title=${Uri.encode(title)}")
-                UrlPolicy.canOpenExternally(normalized) -> openInCustomTab(context, normalized)
-                else -> showUnhandledUrl(context, normalized)
-            }
-        }
     }
 
     Scaffold(
@@ -705,7 +707,7 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
             composable("deadlines") {
                 DeadlinesScreen(
                     container = container,
-                    onOpenUrl = { url, title -> openUrl(url, title) },
+                    onOpenUrl = onOpenUrl,
                     onOpenAssignment = { courseId, moduleId, assignId, title ->
                         rootNav.navigateFromUser(
                             "assignment/$courseId/$moduleId/$assignId?title=${Uri.encode(title)}",
@@ -716,7 +718,7 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
                     },
                 )
             }
-            composable("notifications") { NotificationsScreen(container, onOpenUrl = ::openUrl) }
+            composable("notifications") { NotificationsScreen(container, onOpenUrl = onOpenUrl) }
             composable("syllabus") { SyllabusScreen(container) }
             composable("portal") {
                 PortalScreen(clearSessionTick = portalClearSessionTick)

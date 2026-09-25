@@ -370,11 +370,15 @@ class MoodleRepository(
             "mod_forum_get_discussion_posts",
             forumPostsParams(discussionId),
         )
-        runCatching {
+        // 閲覧記録は失敗しても投稿の表示は続ける。ただし画面離脱のキャンセルは握りつぶさない (G13)
+        try {
             client.call(
                 "mod_forum_view_forum_discussion",
                 forumPostsParams(discussionId),
             )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
         }
         return resp.posts
     }
@@ -393,11 +397,12 @@ class MoodleRepository(
         val privateToken = client.privateToken() ?: return null
         val now = System.currentTimeMillis()
         if (now - lastAutologinKeyRequestAtMillis < AUTOLOGIN_KEY_MIN_INTERVAL_MILLIS) return null
-        lastAutologinKeyRequestAtMillis = now
         val key: AutologinKey = client.callAs(
             "tool_mobile_get_autologin_key",
             mapOf("privatetoken" to privateToken),
         )
+        // サーバーが鍵を発行したときだけ待ち時間を数える (通信失敗で6分間使えなくならないように。G08)
+        lastAutologinKeyRequestAtMillis = now
         if (key.autologinurl.isBlank() || key.key.isBlank()) return null
         if (!UrlPolicy.isAllowedMoodleUrl(key.autologinurl)) return null
         val encoded = java.net.URLEncoder.encode(targetUrl, "UTF-8")
@@ -405,6 +410,11 @@ class MoodleRepository(
     }.getOrElse { error ->
         if (error is kotlinx.coroutines.CancellationException) throw error
         null
+    }
+
+    /** ログアウト時に呼ぶ。次のアカウントが直後に自動ログインURLを使えるようにする */
+    fun resetAutologinThrottle() {
+        lastAutologinKeyRequestAtMillis = 0L
     }
 
     /** pluginfile等のファイルURLにトークンを付与する (認証付きダウンロード用) */
