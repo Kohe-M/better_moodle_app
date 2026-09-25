@@ -12,8 +12,12 @@ import dev.rits.bettermoodle.data.AssignmentEditor
 import dev.rits.bettermoodle.data.AssignmentEditorState
 import dev.rits.bettermoodle.data.AssignmentFileDraft
 import dev.rits.bettermoodle.data.DraftStateStore
+import dev.rits.bettermoodle.data.FileDraftStore
+import dev.rits.bettermoodle.data.KeystoreCrypto
+import dev.rits.bettermoodle.data.LayeredDraftStore
 import dev.rits.bettermoodle.data.RepositoryAssignmentGateway
 import dev.rits.bettermoodle.data.SubmissionFileKey
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -22,7 +26,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.security.MessageDigest
 
 /**
  * 本人確認できない保留草稿の画面向け情報 (W03)。
@@ -42,8 +45,13 @@ data class OrphanedDraftInfo(
  * 課題画面の状態保持。復元は [AssignmentDraftPersistence] に委ね、
  * [AssignmentEditor] の保存フック経由で「未確認の書き込みは送信より前に」保存する (V01)。
  *
+ * 保存先 (G02): 端末内の暗号化ファイル ([FileDraftStore]) を正とし、SavedStateHandle にも同じ内容を書く。
+ * SavedStateHandle だけだと、セッション失効で画面スタックが作り直されたときやタスク終了で下書きが消えるため。
+ * 旧版が SavedStateHandle に残した内容は [LayeredDraftStore] 経由で読み、移行する。
+ *
  * 復元の方針 (V04 / W02 / W03):
- * - 保存時と同じアカウント (認証トークンのハッシュ) なら草稿・基準値・競合・未確認操作を復元する
+ * - 保存時と同じアカウントなら草稿・基準値・競合・未確認操作を復元する。アカウントは Moodle のユーザーID で
+ *   識別するので、同じ利用者が再ログインした場合も復元できる (旧版のトークンハッシュも同一とみなす)
  * - それ以外 (旧形式でアカウント不明 / 別アカウント) は編集領域から**保留領域へ退避**し、
  *   採用の保存完了か明示的な破棄まで保存したまま残す。新しい ViewModel でも保留として見える
  * - 保留中は本文を画面へ出さない。所有者が分かっていて不一致なら取り込みもできない
@@ -51,26 +59,22 @@ data class OrphanedDraftInfo(
  *   利用者の明示操作で取り込める
  * - 別アカウントの未確認操作は復元しない
  *
- * トークンのハッシュは認証情報の識別であり Moodle ユーザーIDではないため、同じ利用者が
- * ログインし直した場合も「所有者不明ではなく不一致」になる。その場合は元のトークンが
- * 失われているので取り込みは許可せず、保留として残す (黙って消しはしない)。
- *
  * 書き込み系操作は [AssignmentEditor] 内で NonCancellable にしているため、画面離脱で
  * ViewModel が破棄されても送信と結果確認は完了する。
  */
 class AssignmentViewModel(
     private val container: AppContainer,
-    savedState: SavedStateHandle,
+    private val savedState: SavedStateHandle,
     courseId: Long,
-    moduleId: Long,
-    assignId: Long,
+    private val moduleId: Long,
+    private val assignId: Long,
     private val nowMillis: () -> Long = { System.currentTimeMillis() },
 ) : ViewModel() {
     private val appContext: Context = container.appContext()
 
-    /** 現在のアカウントの識別子 (トークンのハッシュ)。復元内容が同じアカウントのものかの照合に使う */
-    private val accountId: String? = container.authSession.currentToken()?.let(::hash)
-    private val persistence = AssignmentDraftPersistence(SavedStateDraftStore(savedState), accountId)
+    /** アカウント確定後に作る (それまでの保存フックは何もしない) */
+    @Volatile private var persistence: AssignmentDraftPersistence? = null
+    private val persistenceReady = CompletableDeferred<AssignmentDraftPersistence>()
 
     private val editor = AssignmentEditor(
         gateway = RepositoryAssignmentGateway(
@@ -80,7 +84,7 @@ class AssignmentViewModel(
         courseId = courseId,
         moduleId = moduleId,
         assignId = assignId,
-        onCheckpoint = persistence::save,
+        onCheckpoint = { state -> persistence?.save(state) },
     )
 
     val state: StateFlow<AssignmentEditorState> = editor.state
@@ -91,25 +95,44 @@ class AssignmentViewModel(
     val orphanedDraft: StateFlow<OrphanedDraftInfo?> = _orphanedDraft
 
     init {
-        val saved = persistence.load()
-        if (saved != null) {
-            if (persistence.belongsToCurrentAccount(saved)) {
-                if (saved.draft.isNotEmpty() || saved.baseline != null) {
-                    editor.restoreDraft(
-                        AssignmentEditor.RestoredDraft(text = saved.draft, baseline = saved.baseline, conflict = saved.conflict),
-                    )
-                }
-                saved.pending?.let(editor::restorePendingWrite)
-            } else {
-                // 旧形式または別アカウント: 保留領域へ退避してから編集領域を消す (先に書くので消えない)
-                persistence.moveToOrphan(saved, nowMillis())
-            }
-        }
-        publishOrphan()
         viewModelScope.launch {
+            val persistence = openPersistence()
+            val saved = persistence.load()
+            if (saved != null) {
+                if (persistence.belongsToCurrentAccount(saved)) {
+                    if (saved.draft.isNotEmpty() || saved.baseline != null) {
+                        editor.restoreDraft(
+                            AssignmentEditor.RestoredDraft(text = saved.draft, baseline = saved.baseline, conflict = saved.conflict),
+                        )
+                    }
+                    saved.pending?.let(editor::restorePendingWrite)
+                } else {
+                    // 旧形式または別アカウント: 保留領域へ退避してから編集領域を消す (先に書くので消えない)
+                    persistence.moveToOrphan(saved, nowMillis())
+                }
+            }
+            this@AssignmentViewModel.persistence = persistence
+            persistenceReady.complete(persistence)
+            publishOrphan()
             editor.refresh()
             editor.checkpoint()
         }
+    }
+
+    private suspend fun openPersistence(): AssignmentDraftPersistence {
+        val account = container.currentAccount()
+        val fileStore = withContext(Dispatchers.IO) {
+            FileDraftStore(
+                file = FileDraftStore.fileFor(container.draftDir, moduleId, assignId),
+                codec = KeystoreCrypto,
+                writer = container.draftWriter,
+            )
+        }
+        return AssignmentDraftPersistence(
+            store = LayeredDraftStore(primary = fileStore, fallback = SavedStateDraftStore(savedState)),
+            accountId = account?.id,
+            legacyAccountIds = account?.legacyIds.orEmpty(),
+        )
     }
 
     /**
@@ -117,8 +140,9 @@ class AssignmentViewModel(
      * 保留領域は取り込み後の保存が済んでから消す (途中で終了しても文章が消えない)。
      */
     fun adoptOrphanedDraft(): Job = viewModelScope.launch {
+        val persistence = persistenceReady.await()
         val orphan = persistence.loadOrphan() ?: return@launch
-        if (orphan.isKnownMismatch(accountId)) return@launch
+        if (persistence.orphanIsForeign(orphan)) return@launch
         editor.restoreDraft(orphan.text)
         editor.refresh()
         editor.checkpoint()
@@ -132,17 +156,18 @@ class AssignmentViewModel(
 
     /** 利用者の明示的な破棄。ここでだけ保留草稿を削除する。 */
     fun discardOrphanedDraft() {
-        persistence.clearOrphan()
+        persistence?.clearOrphan()
         publishOrphan()
     }
 
     private fun publishOrphan() {
+        val persistence = persistence ?: return
         val orphan = persistence.loadOrphan()
         _orphanedDraft.value = when {
             orphan == null -> null
             // 保存時と同じアカウントに戻ってきたら通常の復元対象として扱えるよう、取り込み可能にする
-            orphan.belongsTo(accountId) -> OrphanedDraftInfo(false, orphan.savedAtMillis, orphan.text.length)
-            else -> OrphanedDraftInfo(orphan.isKnownMismatch(accountId), orphan.savedAtMillis, orphan.text.length)
+            persistence.orphanBelongsToCurrent(orphan) -> OrphanedDraftInfo(false, orphan.savedAtMillis, orphan.text.length)
+            else -> OrphanedDraftInfo(persistence.orphanIsForeign(orphan), orphan.savedAtMillis, orphan.text.length)
         }
     }
 
@@ -228,9 +253,6 @@ class AssignmentViewModel(
             editor.checkpoint()
         }
     }
-
-    private fun hash(value: String): String =
-        MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
 
     private data class PickedFileMeta(val displayName: String?, val size: Long?)
 

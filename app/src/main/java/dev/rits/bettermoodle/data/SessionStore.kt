@@ -1,9 +1,6 @@
 package dev.rits.bettermoodle.data
 
 import android.content.Context
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
-import android.util.Base64
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -16,11 +13,6 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.security.KeyStore
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 
 private val Context.dataStore by preferencesDataStore(name = "session")
 
@@ -41,6 +33,8 @@ class SessionStore(private val context: Context) : AuthTokenStore, SyllabusUrlCa
         val CONSUMED_DEEP_LINK = stringPreferencesKey("consumed_deep_link")
         val DEADLINE_CURSOR_FROM = longPreferencesKey("deadline_cursor_from")
         val DEADLINE_CURSOR_AFTER = longPreferencesKey("deadline_cursor_after")
+        val USER_ID = longPreferencesKey("moodle_user_id")
+        val USER_ID_TOKEN_HASH = stringPreferencesKey("moodle_user_id_token_hash")
     }
 
     private val migrationMutex = Mutex()
@@ -100,6 +94,22 @@ class SessionStore(private val context: Context) : AuthTokenStore, SyllabusUrlCa
             prefs.remove(Keys.DEADLINE_CURSOR_FROM)
             prefs.remove(Keys.DEADLINE_CURSOR_AFTER)
             prefs.remove(Keys.CONSUMED_DEEP_LINK)
+            prefs.remove(Keys.USER_ID)
+            prefs.remove(Keys.USER_ID_TOKEN_HASH)
+        }
+    }
+
+    /** トークン ([tokenHash]) に対応する Moodle ユーザーID。オフラインでも下書きの所有者を判定できるよう保存する */
+    suspend fun cachedUserId(tokenHash: String): Long? {
+        val prefs = context.dataStore.data.first()
+        if (prefs[Keys.USER_ID_TOKEN_HASH] != tokenHash) return null
+        return prefs[Keys.USER_ID]?.takeIf { it > 0L }
+    }
+
+    suspend fun saveUserId(tokenHash: String, userId: Long) {
+        context.dataStore.edit {
+            it[Keys.USER_ID_TOKEN_HASH] = tokenHash
+            it[Keys.USER_ID] = userId
         }
     }
 
@@ -123,43 +133,9 @@ class SessionStore(private val context: Context) : AuthTokenStore, SyllabusUrlCa
         }
     }
 
-    private fun encryptToken(token: String): String {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
-        val iv = cipher.iv
-        val encrypted = cipher.doFinal(token.toByteArray(Charsets.UTF_8))
-        return "${Base64.encodeToString(iv, Base64.NO_WRAP)}:${Base64.encodeToString(encrypted, Base64.NO_WRAP)}"
-    }
+    private fun encryptToken(token: String): String = KeystoreCrypto.encrypt(token)
 
-    private fun decryptToken(value: String?): String? {
-        if (value.isNullOrBlank()) return null
-        return runCatching {
-            val parts = value.split(':')
-            if (parts.size != 2) return null
-            val iv = Base64.decode(parts[0], Base64.NO_WRAP)
-            val encrypted = Base64.decode(parts[1], Base64.NO_WRAP)
-            val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
-            String(cipher.doFinal(encrypted), Charsets.UTF_8)
-        }.getOrNull()
-    }
-
-    private fun secretKey(): SecretKey {
-        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        (keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
-
-        val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
-        val spec = KeyGenParameterSpec.Builder(
-            KEY_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setRandomizedEncryptionRequired(true)
-            .build()
-        keyGenerator.init(spec)
-        return keyGenerator.generateKey()
-    }
+    private fun decryptToken(value: String?): String? = KeystoreCrypto.decrypt(value)
 
     override suspend fun syllabusCache(): Map<String, String> {
         val raw = context.dataStore.data.first()[Keys.SYLLABUS_CACHE] ?: return emptyMap()
@@ -230,12 +206,5 @@ class SessionStore(private val context: Context) : AuthTokenStore, SyllabusUrlCa
                 it[Keys.NOTIFIED_EVENT_IDS] = ids
             }
         }
-    }
-
-    companion object {
-        private const val ANDROID_KEYSTORE = "AndroidKeyStore"
-        private const val KEY_ALIAS = "better_moodle_ws_token_v1"
-        private const val TRANSFORMATION = "AES/GCM/NoPadding"
-        private const val GCM_TAG_BITS = 128
     }
 }

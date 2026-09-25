@@ -172,6 +172,9 @@ private fun LoggedInRoot(container: AppContainer) {
     val context = androidx.compose.ui.platform.LocalContext.current
 
     val rootNav = rememberNavController()
+
+    // 下書きの所有者判定に使う Moodle ユーザーIDを、通信できるうちに取得・保存しておく (G02)
+    LaunchedEffect(Unit) { container.currentAccount() }
     /**
      * URLをネイティブ画面/WebView/外部ブラウザへ振り分ける。
      * [fromUser] が false (通知タップ等) のときは遷移アニメーション中のガードを通さない
@@ -742,10 +745,17 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
     }
 
     if (showLogout) {
+        val draftCount = remember { container.savedDraftCount() }
         AlertDialog(
             onDismissRequest = { showLogout = false },
             title = { Text("ログアウト") },
-            text = { Text("保存されたトークンとキャッシュを削除します。よろしいですか?") },
+            text = {
+                Text(
+                    "保存されたトークンとキャッシュを削除します。" +
+                        (if (draftCount > 0) "\n\n未送信の課題の下書きが${draftCount}件あります。ログアウトすると下書きも削除されます。" else "") +
+                        "\n\nよろしいですか?",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     showLogout = false

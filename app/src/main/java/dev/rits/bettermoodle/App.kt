@@ -14,6 +14,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import dev.rits.bettermoodle.data.AuthSession
 import dev.rits.bettermoodle.data.AuthState
+import dev.rits.bettermoodle.data.FileDraftStore
 import dev.rits.bettermoodle.data.MoodleClient
 import dev.rits.bettermoodle.data.MoodleRepository
 import dev.rits.bettermoodle.data.NotificationReadSync
@@ -125,10 +126,44 @@ class AppContainer(private val app: Application) {
 
     fun appContext(): android.content.Context = app
 
+    /** 課題の下書きの保存先 (バックアップ対象外の私的領域。G02) */
+    val draftDir: java.io.File get() = java.io.File(app.noBackupFilesDir, "assignment_drafts")
+
+    /** 下書きファイルの書き込み専用スレッド (書き込み順を保つ) */
+    val draftWriter: java.util.concurrent.Executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /**
+     * 現在のアカウントの識別子 (下書きの所有者判定用。G02)。
+     * Moodle のユーザーIDを優先する (同じ利用者が再ログインしても一致する)。取得できないとき
+     * (オフラインで未保存など) はトークンのハッシュで代用する。未ログインなら null。
+     */
+    suspend fun currentAccount(): DraftAccount? {
+        val token = authSession.currentToken() ?: return null
+        val tokenHash = tokenHash(token)
+        val userId = catchingNonCancel { sessionStore.cachedUserId(tokenHash) }
+            ?: withTimeoutOrNull(USER_ID_TIMEOUT_MILLIS) {
+                catchingNonCancel { moodleRepository.siteInfo().userid }
+            }?.takeIf { it > 0L }?.also { id -> catchingNonCancel { sessionStore.saveUserId(tokenHash, id) } }
+        return DraftAccount(
+            id = userId?.let { "u:$it" } ?: "t:$tokenHash",
+            // 旧版はトークンハッシュをそのまま識別子にしていた
+            legacyIds = setOf(tokenHash, "t:$tokenHash"),
+        )
+    }
+
+    /** 保存中の課題の下書きの件数 (ログアウト確認用) */
+    fun savedDraftCount(): Int = FileDraftStore.count(draftDir)
+
     suspend fun syncTokenCache() = authSession.sync()
 
-    /** ログアウト。画面が破棄されても後片付けまで完了する。 */
-    fun logout() = authSession.logout()
+    /**
+     * 利用者が明示的に行うログアウト。画面が破棄されても後片付けまで完了する。
+     * 課題の下書きも削除する (invalidtoken による強制ログアウトでは残し、同じ利用者の再ログインで復元する)。
+     */
+    fun logout() {
+        draftWriter.execute { FileDraftStore.deleteAll(draftDir) }
+        authSession.logout()
+    }
 
     private suspend fun clearSessionArtifacts() {
         LoadableMemoryCache.clear()
@@ -153,5 +188,22 @@ class AppContainer(private val app: Application) {
 
     companion object {
         private const val COOKIE_CLEAR_TIMEOUT_MILLIS = 3_000L
+        private const val USER_ID_TIMEOUT_MILLIS = 5_000L
+
+        fun tokenHash(token: String): String =
+            java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray())
+                .take(12).joinToString("") { "%02x".format(it) }
+
+        private suspend fun <T> catchingNonCancel(block: suspend () -> T): T? =
+            try {
+                block()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
     }
 }
+
+/** 下書きの所有者識別子。[legacyIds] は同じ利用者を指す旧形式の識別子 */
+data class DraftAccount(val id: String, val legacyIds: Set<String>)

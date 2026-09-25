@@ -29,8 +29,16 @@ interface DraftStateStore {
  */
 class AssignmentDraftPersistence(
     private val store: DraftStateStore,
-    /** 現在のアカウント識別子 (認証トークンのハッシュ)。Moodle ユーザーIDではない */
+    /**
+     * 現在のアカウント識別子。Moodle のユーザーID ("u:<userid>") を使う (G02)。取得できないときは
+     * 認証トークンのハッシュ ("t:<hash>") で代用する。
+     */
     private val accountId: String?,
+    /**
+     * 同じ利用者を指す旧形式の識別子 (旧版が保存したトークンハッシュなど)。これらで保存された内容も
+     * 現在のアカウントのものとして復元する。
+     */
+    private val legacyAccountIds: Set<String> = emptySet(),
 ) {
     data class Saved(
         val draft: String,
@@ -74,8 +82,16 @@ class AssignmentDraftPersistence(
     }
 
     /** 現在のアカウントのものとして扱えるか */
-    fun belongsToCurrentAccount(saved: Saved): Boolean =
-        accountId != null && saved.account != null && saved.account == accountId
+    fun belongsToCurrentAccount(saved: Saved): Boolean = isCurrent(saved.account)
+
+    /** 保留草稿が現在のアカウントのものか */
+    fun orphanBelongsToCurrent(orphan: Orphan): Boolean = isCurrent(orphan.ownerAccount)
+
+    /** 保留草稿の所有者が分かっていて、現在のアカウントと違う */
+    fun orphanIsForeign(orphan: Orphan): Boolean = orphan.ownerAccount != null && !isCurrent(orphan.ownerAccount)
+
+    private fun isCurrent(account: String?): Boolean =
+        accountId != null && account != null && (account == accountId || account in legacyAccountIds)
 
     /**
      * 復元に必要な情報を保存する。草稿が無く未確認の書き込みも無く競合も無ければ消す。
