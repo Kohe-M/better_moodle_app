@@ -55,5 +55,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.jsoup)
 
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit)
+    // 提出WS契約 (HTTPリクエスト本文) を検証するためのモックサーバー
+    testImplementation(libs.okhttp.mockwebserver)
 }
