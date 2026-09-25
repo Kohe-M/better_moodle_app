@@ -38,6 +38,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -102,6 +103,8 @@ fun CourseScreen(
     var externalToConfirm by remember { mutableStateOf<Pair<String, String>?>(null) }
     var folderToShow by remember { mutableStateOf<CourseModule?>(null) }
     var downloadToShare by remember { mutableStateOf<CourseDownloadFile?>(null) }
+    // シラバスURLの解決中は再度押せないようにする (連打で並行検索しない。G18)
+    var resolvingSyllabus by remember { mutableStateOf(false) }
 
     fun showCannotOpenLink() {
         Toast.makeText(context, "このリンクは開けません", Toast.LENGTH_SHORT).show()
@@ -204,19 +207,31 @@ fun CourseScreen(
                 },
                 actions = {
                     if (courseCode != null) {
-                        IconButton(onClick = {
-                            scope.launch {
-                                when (val result = container.syllabusRepository.resolve(courseCode)) {
-                                    is SyllabusResolveResult.Found -> openInCustomTab(context, result.url)
-                                    else -> {
-                                        // 失敗理由を知らせ、検索サイトで探せるようにする
-                                        Toast.makeText(context, result.failureMessage, Toast.LENGTH_LONG).show()
-                                        openInCustomTab(context, SyllabusRepository.SYLLABUS_SEARCH_URL)
+                        IconButton(
+                            enabled = !resolvingSyllabus,
+                            onClick = {
+                                resolvingSyllabus = true
+                                scope.launch {
+                                    try {
+                                        when (val result = container.syllabusRepository.resolve(courseCode)) {
+                                            is SyllabusResolveResult.Found -> openInCustomTab(context, result.url)
+                                            else -> {
+                                                // 失敗理由を知らせ、検索サイトで探せるようにする
+                                                Toast.makeText(context, result.failureMessage, Toast.LENGTH_LONG).show()
+                                                openInCustomTab(context, SyllabusRepository.SYLLABUS_SEARCH_URL)
+                                            }
+                                        }
+                                    } finally {
+                                        resolvingSyllabus = false
                                     }
                                 }
+                            },
+                        ) {
+                            if (resolvingSyllabus) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "シラバス")
                             }
-                        }) {
-                            Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "シラバス")
                         }
                     }
                 },
@@ -224,12 +239,17 @@ fun CourseScreen(
             )
         },
     ) { padding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+        // 他の一覧画面と同じく、再読込に失敗して古い内容を表示していることを知らせる (G18)
+        StaleDataBanner(state, onRetry = refresh)
         PullToRefreshBox(
             isRefreshing = state.isRefreshing,
             onRefresh = refresh,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
+            modifier = Modifier.fillMaxSize(),
         ) {
             when (val s = state) {
                 is UiState.Loading -> LoadingBox()
@@ -272,6 +292,7 @@ fun CourseScreen(
                     }
                 }
             }
+        }
         }
     }
 
