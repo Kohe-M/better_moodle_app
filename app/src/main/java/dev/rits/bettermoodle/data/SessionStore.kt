@@ -34,6 +34,7 @@ class SessionStore(private val context: Context) : AuthTokenStore, SyllabusUrlCa
         val DEADLINE_CURSOR_FROM = longPreferencesKey("deadline_cursor_from")
         val DEADLINE_CURSOR_AFTER = longPreferencesKey("deadline_cursor_after")
         val USER_ID = longPreferencesKey("moodle_user_id")
+        val AURA_FWUID = stringPreferencesKey("syllabus_aura_fwuid")
         val USER_ID_TOKEN_HASH = stringPreferencesKey("moodle_user_id_token_hash")
     }
 
@@ -160,6 +161,12 @@ class SessionStore(private val context: Context) : AuthTokenStore, SyllabusUrlCa
     }
 
     override fun syllabusCacheKey(code: String, year: Int): String = "$year:$code"
+
+    override suspend fun auraFwuid(): String? = context.dataStore.data.first()[Keys.AURA_FWUID]
+
+    override suspend fun saveAuraFwuid(fwuid: String) {
+        context.dataStore.edit { it[Keys.AURA_FWUID] = fwuid }
+    }
 
     /** 消費済みの通知宛先キー (プロセス再生成後に同じ Intent を二重に処理しないため) */
     suspend fun consumedDeepLinkKey(): String? =

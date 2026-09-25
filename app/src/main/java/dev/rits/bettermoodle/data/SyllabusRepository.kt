@@ -71,6 +71,10 @@ interface SyllabusUrlCache {
     suspend fun syllabusCache(): Map<String, String>
     suspend fun saveSyllabusUrl(code: String, year: Int, url: String)
     fun syllabusCacheKey(code: String, year: Int): String = "$year:$code"
+
+    /** 最後に確認できた Aura の fwuid (Salesforce の更新で変わる。G05) */
+    suspend fun auraFwuid(): String? = null
+    suspend fun saveAuraFwuid(fwuid: String) {}
 }
 
 class SyllabusRepository(
@@ -101,6 +105,56 @@ class SyllabusRepository(
         limits: Int = 50,
         lang: String = "ja",
     ): SyllabusSearchResult = withContext(Dispatchers.IO) {
+        val fwuid = currentFwuid()
+        val (result, raw) = executeSearch(keyword, year, limits, lang, fwuid)
+        // Salesforce のリリースで fwuid が変わると clientOutOfSync になる。新しい値を取得して1回だけ再試行する (G05)
+        if (result !is SyllabusSearchResult.InvalidResponse || raw == null || !isClientOutOfSync(raw)) {
+            return@withContext result
+        }
+        val fresh = extractFwuid(raw)?.takeIf { it != fwuid } ?: fetchFwuidFromPage()?.takeIf { it != fwuid }
+            ?: return@withContext result
+        knownFwuid = fresh
+        try {
+            store.saveAuraFwuid(fresh)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // 保存できなくてもこのプロセスではメモリの値を使う
+        }
+        executeSearch(keyword, year, limits, lang, fresh).first
+    }
+
+    @Volatile private var knownFwuid: String? = null
+
+    private suspend fun currentFwuid(): String =
+        knownFwuid ?: try {
+            store.auraFwuid()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }?.takeIf { it.isNotBlank() }?.also { knownFwuid = it } ?: FWUID
+
+    /** 検索ページの HTML から現在の fwuid を読む。取れなければ null */
+    private suspend fun fetchFwuidFromPage(): String? = try {
+        http.newCall(Request.Builder().url("$baseUrl/syllabus/s/").build()).useResponse { resp ->
+            if (!resp.isSuccessful) return@useResponse null
+            resp.body?.string()?.let(::extractFwuid)
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
+    /** 検索を1回実行する。応答本文 (解釈できた場合) も返す */
+    private suspend fun executeSearch(
+        keyword: String,
+        year: Int,
+        limits: Int,
+        lang: String,
+        fwuid: String,
+    ): Pair<SyllabusSearchResult, String?> {
         val action = buildJsonObject {
             put("lang", lang)
             put("keyword", keyword)
@@ -131,7 +185,7 @@ class SyllabusRepository(
         }
         val auraContext = buildJsonObject {
             put("mode", "PROD")
-            put("fwuid", FWUID)
+            put("fwuid", fwuid)
             put("app", "siteforce:communityApp")
             put("loaded", buildJsonObject {})
             put("dn", buildJsonArray {})
@@ -150,20 +204,20 @@ class SyllabusRepository(
             .header("Referer", "$baseUrl/syllabus/s/")
             .build()
 
-        try {
+        return try {
             // 画面離脱でキャンセルできるよう、ヘッダ待ちと本文読み取りの両方を中断可能にする
             http.newCall(request).useResponse { resp ->
-                if (!resp.isSuccessful) return@useResponse SyllabusSearchResult.NetworkError(resp.code)
-                val raw = resp.body?.string() ?: return@useResponse SyllabusSearchResult.InvalidResponse
-                parseRecords(raw)
+                if (!resp.isSuccessful) return@useResponse SyllabusSearchResult.NetworkError(resp.code) to null
+                val raw = resp.body?.string() ?: return@useResponse SyllabusSearchResult.InvalidResponse to null
+                parseRecords(raw) to raw
             }
         } catch (e: CancellationException) {
             throw e
         } catch (_: java.io.IOException) {
-            SyllabusSearchResult.NetworkError()
+            SyllabusSearchResult.NetworkError() to null
         } catch (_: Exception) {
             // 通信は成功したが解釈中に例外 → 通信失敗ではなく応答形式の問題
-            SyllabusSearchResult.InvalidResponse
+            SyllabusSearchResult.InvalidResponse to null
         }
     }
 
@@ -248,5 +302,16 @@ class SyllabusRepository(
 
         internal fun cleanAuraJson(s: String): String =
             s.removeSuffix("/*ERROR*/").trim()
+
+        private val FWUID_JSON_REGEX = Regex(""""fwuid"\s*:\s*"([A-Za-z0-9_\-.]{10,})"""")
+        private val FWUID_SCRIPT_REGEX = Regex("""/auraFW/javascript/([A-Za-z0-9_\-.]{10,})/""")
+
+        /** Aura の「クライアントの版が古い」応答か */
+        internal fun isClientOutOfSync(raw: String): Boolean = "clientOutOfSync" in raw
+
+        /** Aura 応答の context や検索ページの HTML から fwuid を取り出す */
+        internal fun extractFwuid(text: String): String? =
+            FWUID_JSON_REGEX.find(text)?.groupValues?.get(1)
+                ?: FWUID_SCRIPT_REGEX.find(text)?.groupValues?.get(1)
     }
 }
