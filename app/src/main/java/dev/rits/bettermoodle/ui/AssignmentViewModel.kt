@@ -193,21 +193,34 @@ class AssignmentViewModel(
     /**
      * 選択したファイルをキャッシュへコピーしてから追加する。コピーも Editor の排他区間で行うので、
      * コピー中に最終提出などを割り込ませない。一時ファイルは必ず削除する。
+     *
+     * - 課題のサイズ上限を超えるファイルはコピー前に断る。サイズを申告しないプロバイダでも、
+     *   上限を超えた時点でコピーを打ち切る (巨大ファイルでストレージを使い切らない。G06)
+     * - ファイル名は Moodle が保存する名前に整形してから使う (G03)
      */
     fun addFile(uri: Uri): Job = viewModelScope.launch {
         var tmp: File? = null
+        val maxBytes = editor.state.value.data?.assignment?.maxSubmissionSizeBytes?.takeIf { it > 0L }
         try {
             editor.addFile {
                 withContext(Dispatchers.IO) {
+                    val resolver = appContext.contentResolver
+                    val meta = queryMeta(resolver, uri)
+                    if (maxBytes != null && meta.size != null && meta.size > maxBytes) throw tooLarge(maxBytes)
                     val file = File.createTempFile("assignment_upload_", ".bin", appContext.cacheDir)
                     tmp = file
-                    val resolver = appContext.contentResolver
-                    val displayName = displayName(resolver, uri) ?: "submission.bin"
+                    val original = meta.displayName ?: "submission.bin"
+                    val filename = AssignmentFileDraft.cleanFilename(original)
                     val size = resolver.openInputStream(uri).use { input ->
                         requireNotNull(input) { "選択したファイルを読み込めません。" }
-                        file.outputStream().use { output -> input.copyTo(output) }
+                        file.outputStream().use { output -> copyWithLimit(input, output, maxBytes) }
                     }
-                    AssignmentFileDraft.LocalFile(file, displayName, size)
+                    AssignmentFileDraft.LocalFile(
+                        file = file,
+                        filename = filename,
+                        sizeBytes = size,
+                        originalFilename = original.takeIf { it != filename },
+                    )
                 }
             }
         } finally {
@@ -219,11 +232,36 @@ class AssignmentViewModel(
     private fun hash(value: String): String =
         MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
 
-    private fun displayName(resolver: android.content.ContentResolver, uri: Uri): String? =
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (cursor.moveToFirst() && index >= 0) cursor.getString(index) else null
+    private data class PickedFileMeta(val displayName: String?, val size: Long?)
+
+    private fun queryMeta(resolver: android.content.ContentResolver, uri: Uri): PickedFileMeta =
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+            PickedFileMeta(
+                displayName = if (nameIndex >= 0 && !cursor.isNull(nameIndex)) cursor.getString(nameIndex) else null,
+                size = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) cursor.getLong(sizeIndex) else null,
+            )
+        } ?: PickedFileMeta(null, null)
+
+    private fun tooLarge(maxBytes: Long) = AssignmentFileDraft.LocalFileRejectedException(
+        AssignmentFileDraft.fileSizeViolation(maxBytes + 1, maxBytes) ?: "ファイルサイズが上限を超えています。",
+    )
+
+    /** [maxBytes] を超えたら打ち切る copyTo */
+    private fun copyWithLimit(input: java.io.InputStream, output: java.io.OutputStream, maxBytes: Long?): Long {
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var copied = 0L
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            copied += read
+            if (maxBytes != null && copied > maxBytes) throw tooLarge(maxBytes)
+            output.write(buffer, 0, read)
         }
+        return copied
+    }
 
     /**
      * SavedStateHandle を [DraftStateStore] として扱う。

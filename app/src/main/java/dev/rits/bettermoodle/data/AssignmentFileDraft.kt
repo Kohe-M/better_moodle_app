@@ -54,8 +54,19 @@ class AssignmentFileDraft(
                 listOfNotNull(add?.let { SubmissionFileFingerprint(SubmissionFileKey.root(it.filename), it.sizeBytes) })
     }
 
-    /** アップロードするローカルファイル。サイズは作成時点で確定させる (一時ファイル削除後も検証に使えるように) */
-    data class LocalFile(val file: File, val filename: String, val sizeBytes: Long = file.length())
+    /**
+     * アップロードするローカルファイル。サイズは作成時点で確定させる (一時ファイル削除後も検証に使えるように)。
+     * [filename] は Moodle が保存する名前 ([cleanFilename] 済み)。[originalFilename] は整形で名前が変わったときの元の名前。
+     */
+    data class LocalFile(
+        val file: File,
+        val filename: String,
+        val sizeBytes: Long = file.length(),
+        val originalFilename: String? = null,
+    )
+
+    /** 選択したファイルを提出に使えない理由 (サイズ超過など)。メッセージはそのまま利用者へ表示する */
+    class LocalFileRejectedException(message: String) : Exception(message)
 
     /**
      * 追加・削除後の draft itemid を返す。呼び出し側は
@@ -83,6 +94,23 @@ class AssignmentFileDraft(
     }
 
     companion object {
+        /** Moodle の PARAM_FILE が削除する文字 (制御文字と & < > " ` | ' : \ /) */
+        private val MOODLE_PARAM_FILE_STRIP = Regex("""[\p{Cntrl}&<>"`|':\\/]""")
+
+        /**
+         * upload.php が `clean_param(PARAM_FILE)` で行う整形と同じ規則でファイル名を整える (G03)。
+         * 整形前の名前で送ると、保存された名前が違うためアップロード結果の検証で失敗する。
+         * 空・"."・".." になった場合は拡張子を残した代替名にする。
+         */
+        fun cleanFilename(name: String): String {
+            val cleaned = MOODLE_PARAM_FILE_STRIP.replace(name, "")
+            if (cleaned.isNotEmpty() && cleaned != "." && cleaned != "..") return cleaned
+            val ext = name.substringAfterLast('.', missingDelimiterValue = "")
+                .let { MOODLE_PARAM_FILE_STRIP.replace(it, "") }
+                .takeIf { it.isNotBlank() && it.length <= 10 }
+            return if (ext != null) "submission.$ext" else "submission"
+        }
+
         /**
          * 追加・削除後に残す既存ファイル集合を決める。識別は (filepath, filename)。
          * - [remove] は削除

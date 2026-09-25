@@ -366,11 +366,21 @@ class AssignmentEditor(
                 prepare()
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: AssignmentFileDraft.LocalFileRejectedException) {
+                fail(e.message ?: "このファイルは提出できません。")
+                return@runExclusive false
             } catch (e: Exception) {
                 fail("選択したファイルを読み込めませんでした。")
                 return@runExclusive false
             }
-            changeFilesLocked(add = local, remove = emptySet())
+            val applied = changeFilesLocked(add = local, remove = emptySet())
+            val original = local.originalFilename
+            if (applied && original != null && original != local.filename) {
+                _state.update {
+                    it.copy(notice = "ファイル提出を更新しました。Moodleで使えない文字を除いたため「${local.filename}」として保存されています (元の名前: $original)。")
+                }
+            }
+            applied
         } ?: false
     }
 
