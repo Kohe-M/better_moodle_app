@@ -1,8 +1,8 @@
 package dev.rits.bettermoodle.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -10,10 +10,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,6 +44,14 @@ import dev.rits.bettermoodle.data.diagnosticCode
 import dev.rits.bettermoodle.data.forumHttpStatus
 import dev.rits.bettermoodle.data.forumLoadErrorMessage
 import dev.rits.bettermoodle.data.forumMoodleErrorCode
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextOverflow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,12 +116,19 @@ fun ForumScreen(
                     }
                 },
                 actions = {
+                    // ネイティブ表示で欠ける添付・埋込のために常時 Moodle へ抜けられるようにする
+                    if (!target.url.isNullOrBlank()) {
+                        IconButton(onClick = onFallbackWeb) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Moodleで開く")
+                        }
+                    }
                     IconButton(onClick = {
                         refreshDiscussions()
                     }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "再読み込み")
                     }
                 },
+                colors = appTopBarColors(),
             )
         },
     ) { padding ->
@@ -126,28 +141,22 @@ fun ForumScreen(
                 )
                 is UiState.Success -> {
                     if (s.data.isEmpty()) {
-                        ErrorBox("ディスカッションはありません。", onRetry = { refreshDiscussions() })
+                        EmptyBox("ディスカッションはありません", onRetry = { refreshDiscussions() }, icon = Icons.Outlined.Forum)
                     } else {
                         LazyColumn(
                             Modifier
                                 .fillMaxSize()
                                 .padding(padding),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = ListContentPadding,
+                            verticalArrangement = Arrangement.spacedBy(ListItemSpacing),
                         ) {
                             items(s.data, key = { it.id }) { discussion ->
                                 DiscussionCard(discussion) { selected = discussion }
                             }
                             item {
-                                Text(
-                                    "新規投稿・返信は、対応するMoodle Web Serviceを確認できるまでアプリ内WebViewで開きます。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable(onClick = onFallbackWeb)
-                                        .padding(12.dp),
-                                )
+                                TextButton(onClick = onFallbackWeb, modifier = Modifier.padding(top = 8.dp)) {
+                                    Text("投稿・返信はMoodleで開く")
+                                }
                             }
                         }
                     }
@@ -197,10 +206,17 @@ fun ForumDiscussionScreen(
                     }
                 },
                 actions = {
+                    // 通知から直接開いた投稿でも、添付・返信のために常時 Moodle へ抜けられるようにする
+                    if (fallbackUrl.isNotBlank()) {
+                        IconButton(onClick = { onFallbackWeb(fallbackUrl, screenTitle) }) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Moodleで開く")
+                        }
+                    }
                     IconButton(onClick = { refreshTick++ }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "再読込")
                     }
                 },
+                colors = appTopBarColors(),
             )
         },
     ) { padding ->
@@ -219,22 +235,40 @@ fun ForumDiscussionScreen(
 
 @Composable
 private fun DiscussionCard(discussion: ForumDiscussion, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(
-            containerColor = if (discussion.numunread > 0) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surfaceVariant,
-        ),
+    val unread = discussion.numunread > 0
+    AppCard(
+        onClick = onClick,
+        containerColor = if (unread) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(discussion.subject.ifBlank { discussion.name }, fontWeight = FontWeight.Bold)
-            Text(
-                "${discussion.userfullname} / 返信 ${discussion.numreplies} / 未読 ${discussion.numunread}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    discussion.subject.ifBlank { discussion.name },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = if (unread) FontWeight.Bold else FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (unread) {
+                    StatusPill(
+                        "未読 ${discussion.numunread}",
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
+            MetaText("${discussion.userfullname} · 返信 ${discussion.numreplies}")
             htmlToPlainText(discussion.message).takeIf { it.isNotBlank() }?.let {
-                Text(it, maxLines = 3, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    it,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
         }
     }
@@ -288,14 +322,18 @@ private fun DiscussionPosts(
                 alwaysAllowFallback = alwaysAllowFallback,
             )
         }
-        is UiState.Success -> LazyColumn(
-            modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        is UiState.Success -> Column(modifier.fillMaxSize()) {
+            // キャッシュ表示中の更新失敗を投稿一覧でも隠さない
+            StaleDataBanner(s, onRetry = refresh)
+            LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = ListContentPadding,
+            verticalArrangement = Arrangement.spacedBy(ListItemSpacing),
         ) {
-            items(s.data, key = { it.id }) { post ->
-                PostCard(post, onOpenUrl)
+            itemsIndexed(s.data, key = { _, post -> post.id }) { index, post ->
+                PostCard(post, isRoot = index == 0, onOpenUrl = onOpenUrl)
             }
+        }
         }
     }
 }
@@ -365,16 +403,42 @@ private fun ForumDiagnostic.toSafeText(): String = buildString {
     appendLine("modName=${target?.modName ?: "-"}")
 }
 
+/**
+ * 投稿カード。最初の投稿 (ディスカッションの本文) は件名を大きく出し、
+ * 以降の返信は投稿者と日時を先頭に置いて会話として読めるようにする。
+ */
 @Composable
-private fun PostCard(post: ForumPost, onOpenUrl: (String, String) -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(post.subject, style = MaterialTheme.typography.titleMedium)
-            Text(
-                "${post.author?.fullname ?: "投稿者不明"} / ${formatTime(post.timecreated)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+private fun PostCard(post: ForumPost, isRoot: Boolean, onOpenUrl: (String, String) -> Unit) {
+    AppCard(
+        containerColor = if (isRoot) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LeadingIconBox(
+                    Icons.Outlined.Person,
+                    contentDescription = null,
+                    size = 32.dp,
+                    tint = if (isRoot) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    containerColor = if (isRoot) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.10f)
+                    },
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        post.author?.fullname ?: "投稿者不明",
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    MetaText(formatTime(post.timecreated))
+                }
+            }
+            if (isRoot && post.subject.isNotBlank()) {
+                Text(post.subject, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
+            }
             HtmlText(
                 html = post.message,
                 onOpenUrl = { onOpenUrl(it, post.subject.ifBlank { "フォーラム" }) },

@@ -28,15 +28,21 @@ object UrlPolicy {
         return source.replaceRange(0, "http".length, "https")
     }
 
-    fun isAllowedMoodleUrl(url: String): Boolean {
+    /**
+     * Moodleサイトのhttps URLか。[host] は既定で本番ホスト。
+     * ループバック (127.0.0.1 / localhost) だけは http も許可する (MockWebServer によるテスト用。
+     * 本番ホストは https 以外を通さない)。
+     */
+    fun isAllowedMoodleUrl(url: String, host: String = MOODLE_HOST): Boolean {
         val uri = parse(url) ?: return false
-        return uri.scheme.equals("https", ignoreCase = true) &&
-            uri.host.equals(MOODLE_HOST, ignoreCase = true)
+        if (!uri.host.equals(host, ignoreCase = true)) return false
+        if (uri.scheme.equals("https", ignoreCase = true)) return true
+        return uri.scheme.equals("http", ignoreCase = true) && isLoopbackHost(host)
     }
 
-    fun isAllowedMoodlePluginFileUrl(url: String): Boolean {
+    fun isAllowedMoodlePluginFileUrl(url: String, host: String = MOODLE_HOST): Boolean {
         val uri = parse(url) ?: return false
-        if (!isAllowedMoodleUrl(url)) return false
+        if (!isAllowedMoodleUrl(url, host)) return false
         val path = uri.path.orEmpty()
         return path == "/pluginfile.php" ||
             path.startsWith("/pluginfile.php/") ||
@@ -44,10 +50,13 @@ object UrlPolicy {
             path.startsWith("/webservice/pluginfile.php/")
     }
 
-    fun isSafeMoodlePluginFileSourceUrl(url: String): Boolean {
+    fun isSafeMoodlePluginFileSourceUrl(url: String, host: String = MOODLE_HOST): Boolean {
         val uri = parse(url) ?: return false
-        return isAllowedMoodlePluginFileUrl(url) && !containsSensitiveParameter(uri)
+        return isAllowedMoodlePluginFileUrl(url, host) && !containsSensitiveParameter(uri)
     }
+
+    private fun isLoopbackHost(host: String): Boolean =
+        host.equals("localhost", ignoreCase = true) || host == "127.0.0.1" || host == "::1"
 
     fun isMoodleCourseUrl(url: String): Boolean {
         val uri = parse(url) ?: return false
@@ -86,9 +95,9 @@ object UrlPolicy {
         return host == MOODLE_HOST || host in microsoftAuthHosts
     }
 
-    fun appendMoodleToken(url: String, token: String): String? {
+    fun appendMoodleToken(url: String, token: String, host: String = MOODLE_HOST): String? {
         val source = url.trim()
-        if (!isSafeMoodlePluginFileSourceUrl(source)) return null
+        if (!isSafeMoodlePluginFileSourceUrl(source, host)) return null
         val uri = parse(source) ?: return null
         if (uri.rawFragment != null) return null
         val query = uri.rawQuery

@@ -31,11 +31,40 @@ data class Assignment(
     val gradingduedate: Long = 0,
     val submissiondrafts: Int = 0,
     val submissionstatement: String = "",
+    val requiresubmissionstatement: Int = 0,
+    val teamsubmission: Int = 0,
+    /** 制限時間 (秒)。0 は制限なし。Moodle 4.0+ */
+    val timelimit: Long = 0,
+    val introattachments: List<MoodleFile> = emptyList(),
     val configs: List<AssignmentConfig> = emptyList(),
 ) {
     fun supports(plugin: String): Boolean =
         configs.any { it.plugin == plugin && it.name == "enabled" && it.value == "1" }
+
+    private fun config(plugin: String, name: String): String? =
+        configs.firstOrNull { it.plugin == plugin && it.name == name }?.value
+
+    /** 制限時間付き課題 (開始APIで計測開始が必要) */
+    val hasTimeLimit: Boolean get() = timelimit > 0L
+
+    /** ファイル提出の最大件数。0/未設定は無制限扱い。 */
+    val maxFileSubmissions: Int
+        get() = config("file", "maxfilesubmissions")?.toIntOrNull()?.takeIf { it > 0 } ?: 0
+
+    /** ファイル提出の1件あたりサイズ上限 (bytes)。0/未設定は無制限扱い。 */
+    val maxSubmissionSizeBytes: Long
+        get() = config("file", "maxsubmissionsizebytes")?.toLongOrNull()?.takeIf { it > 0L } ?: 0L
 }
+
+/** mod_assign_start_submission の応答 */
+@Serializable
+data class StartSubmissionResponse(
+    val submissionid: Long = 0,
+    val attemptnumber: Int = 0,
+    val timestarted: Long = 0,
+    val timelimit: Long = 0,
+    val warnings: List<WsWarning> = emptyList(),
+)
 
 @Serializable
 data class AssignmentConfig(
@@ -61,6 +90,8 @@ data class AssignmentLastAttempt(
     val canedit: Boolean = false,
     val cansubmit: Boolean = false,
     val gradingstatus: String = "",
+    val blindmarking: Boolean = false,
+    val timelimit: Long = 0,
 )
 
 @Serializable
@@ -71,6 +102,7 @@ data class AssignmentSubmission(
     val timecreated: Long = 0,
     val timemodified: Long = 0,
     val status: String = "",
+    val timestarted: Long? = null,
     val plugins: List<SubmissionPlugin> = emptyList(),
 )
 
@@ -114,7 +146,8 @@ data class AssignmentGrade(
 data class MoodleFile(
     val filename: String = "",
     val filepath: String = "",
-    val filesize: Long = 0,
+    /** サーバーが返したサイズ。応答に無ければ null (0 バイトの実ファイルと区別する) */
+    val filesize: Long? = null,
     val fileurl: String? = null,
     val mimetype: String? = null,
     val timemodified: Long = 0,
@@ -141,3 +174,23 @@ data class WsWarning(
     val warningcode: String = "",
     val message: String = "",
 )
+
+@Serializable
+data class UnusedDraftItemIdResponse(
+    val itemid: Long = 0,
+    val warnings: List<WsWarning> = emptyList(),
+)
+
+@Serializable
+data class MarkNotificationReadResponse(
+    val notificationid: Long = 0,
+    val warnings: List<WsWarning> = emptyList(),
+)
+
+/**
+ * HTTP 200 で返ったが warnings 付きだった書き込み。Moodle は締切超過・権限不足などを
+ * exception ではなく warning で返すため、成功扱いにしてはいけない。
+ */
+class AssignmentSubmissionRejectedException(
+    val warnings: List<WsWarning>,
+) : Exception(warnings.joinToString(" / ") { it.message.ifBlank { it.warningcode } }.ifBlank { "Moodleが保存を拒否しました" })

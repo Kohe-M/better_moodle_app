@@ -1,18 +1,23 @@
 package dev.rits.bettermoodle.ui
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Badge
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Assignment
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -20,14 +25,25 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
+import dev.rits.bettermoodle.data.NotificationsPage
 import dev.rits.bettermoodle.data.PopupNotification
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import org.jsoup.Jsoup
 import java.time.Instant
 import java.time.ZoneId
@@ -46,20 +62,66 @@ fun NotificationsScreen(
     container: AppContainer,
     onOpenUrl: (url: String, title: String) -> Unit = { _, _ -> },
 ) {
-    val (state, refresh) = rememberLoadable("notifications") { container.moodleRepository.notifications() }
+    // 更新世代: 明示的な更新のたびに追加ページを捨て、追加取得中に更新されたら古い世代の応答を混ぜない
+    var generation by rememberSaveable { mutableIntStateOf(0) }
+    val (state, reloadFirstPage) = rememberLoadable("notifications") { container.moodleRepository.notifications() }
+    val refresh = {
+        generation++
+        reloadFirstPage()
+    }
     var filter by remember { mutableStateOf(NotificationFilter.ALL) }
     var selectedNotification by remember { mutableStateOf<PopupNotification?>(null) }
+    val firstPage = (state as? UiState.Success)?.data
+    var extraPages by remember(generation) { mutableStateOf<List<NotificationsPage>>(emptyList()) }
+    var loadingMore by remember(generation) { mutableStateOf(false) }
+    var loadMoreError by remember(generation) { mutableStateOf<String?>(null) }
+    // 既読同期はセッション scope (画面遷移でキャンセルされない)。成功IDと失敗理由を表示に反映する
+    val readSync by container.notificationReadSync.state.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    fun loadMore() {
+        // 先頭ページの再取得中は旧 offset で続きを取らない
+        if (state.isRefreshing) return
+        val last = extraPages.lastOrNull() ?: firstPage ?: return
+        if (!last.hasMore || loadingMore) return
+        loadingMore = true
+        loadMoreError = null
+        val requestGeneration = generation
+        scope.launch {
+            try {
+                val page = container.moodleRepository.notifications(offset = last.nextOffset)
+                if (requestGeneration == generation) extraPages = extraPages + page
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (requestGeneration == generation) loadMoreError = loadErrorMessage(e)
+            }
+            if (requestGeneration == generation) loadingMore = false
+        }
+    }
+
+    fun markRead(n: PopupNotification) {
+        if (n.read) return
+        container.notificationReadSync.request(n.id)
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             NotificationFilter.entries.forEach { f ->
                 FilterChip(
                     selected = filter == f,
                     onClick = { filter = f },
                     label = { Text(f.label) },
-                    modifier = Modifier.padding(end = 8.dp),
                 )
             }
+        }
+        // 更新失敗のバナーは 0件・フィルタ0件の表示より外側に置く
+        StaleDataBanner(state, onRetry = refresh)
+        readSync.failed.entries.firstOrNull()?.let { (id, reason) ->
+            MessageBanner("通知 #$id を既読にできませんでした ($reason)。もう一度開くと再試行します。", isError = true, onDismiss = null)
         }
         PullToRefreshBox(
             isRefreshing = state.isRefreshing,
@@ -70,26 +132,48 @@ fun NotificationsScreen(
                 is UiState.Loading -> LoadingBox()
                 is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
                 is UiState.Success -> {
-                    val filtered = s.data.notifications.filter {
+                    val lastPage = extraPages.lastOrNull() ?: s.data
+                    val all = (s.data.notifications + extraPages.flatMap { it.notifications })
+                        .distinctBy { it.id }
+                        .map { if (it.id in readSync.readIds) it.copy(read = true) else it }
+                    val filtered = all.filter {
                         when (filter) {
                             NotificationFilter.ALL -> true
                             NotificationFilter.ASSIGN -> it.isAssignRelated()
                             NotificationFilter.OTHER -> !it.isAssignRelated()
                         }
                     }
-                    if (filtered.isEmpty()) {
-                        ErrorBox("通知はありません", onRetry = refresh)
+                    if (filtered.isEmpty() && !lastPage.hasMore) {
+                        EmptyBox(
+                            if (all.isEmpty()) "通知はありません" else "このフィルタに該当する通知はありません",
+                            onRetry = refresh,
+                            icon = Icons.Outlined.NotificationsNone,
+                        )
                         return@PullToRefreshBox
                     }
-                    LazyColumn(contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
+                    LazyColumn(
+                        contentPadding = ListContentPadding,
+                        verticalArrangement = Arrangement.spacedBy(ListItemSpacing),
+                    ) {
                         items(filtered, key = { it.id }) { n ->
                             NotificationCard(n) {
+                                markRead(n)
                                 val contextUrl = n.contexturl?.takeIf { it.isNotBlank() }
                                 if (contextUrl != null) {
                                     onOpenUrl(contextUrl, n.contexturlname ?: n.subject)
                                 } else {
                                     selectedNotification = n
                                 }
+                            }
+                        }
+                        if (lastPage.hasMore || loadMoreError != null) {
+                            item(key = "load-more") {
+                                LoadMoreRow(
+                                    loading = loadingMore,
+                                    error = loadMoreError,
+                                    label = "${all.size}件を表示中。古い通知がまだあります",
+                                    onLoadMore = ::loadMore,
+                                )
                             }
                         }
                     }
@@ -117,43 +201,63 @@ private fun NotificationCard(n: PopupNotification, onClick: () -> Unit) {
     val time = Instant.ofEpochSecond(n.timecreated)
         .atZone(ZoneId.systemDefault())
         .format(DateTimeFormatter.ofPattern("M/d HH:mm"))
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(
-            containerColor = if (n.read) MaterialTheme.colorScheme.surfaceVariant
-            else MaterialTheme.colorScheme.secondaryContainer,
-        ),
+    val unread = !n.read
+    val assignRelated = n.isAssignRelated()
+    // 未読は太字+濃い背景、既読は通常の太さ+薄い文字で「読む必要があるもの」を浮かせる
+    AppCard(
+        onClick = onClick,
+        containerColor = if (unread) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                if (!n.read) {
-                    Badge(modifier = Modifier.padding(end = 8.dp)) { Text("未読") }
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            LeadingIconBox(
+                icon = if (assignRelated) Icons.AutoMirrored.Filled.Assignment else Icons.Outlined.Notifications,
+                contentDescription = null,
+                tint = if (unread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                containerColor = if (unread) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f)
+                },
+                size = 36.dp,
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    MetaText(time, modifier = Modifier.weight(1f))
+                    if (unread) {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary),
+                        )
+                    }
                 }
                 Text(
                     n.subject,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = if (unread) FontWeight.Bold else FontWeight.Medium,
+                    color = if (unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                n.smallmessage?.takeIf { it.isNotBlank() }?.let { msg ->
+                    val plain = Jsoup.parse(msg).text()
+                    // 件名と同じ本文を繰り返さない (Moodleの通知は件名=本文のことが多い)
+                    if (plain.trim() != n.subject.trim()) {
+                        Text(
+                            plain,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
-            n.smallmessage?.takeIf { it.isNotBlank() }?.let { msg ->
-                Text(
-                    Jsoup.parse(msg).text(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 3,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-            Text(
-                time,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-                modifier = Modifier.padding(top = 4.dp),
-            )
         }
     }
 }
@@ -166,7 +270,7 @@ private fun NotificationDetailSheet(
     onOpenUrl: (url: String, title: String) -> Unit,
 ) {
     val fullHtml = notification.fullmessagehtml
-        ?.takeIf { htmlToPlainText(it).isNotBlank() }
+        ?.takeIf { htmlHasRenderableContent(it) }
     val fallbackMessage = notification.smallmessage
         ?.let { Jsoup.parse(it).text().trim() }
         ?.takeIf { it.isNotBlank() }
@@ -182,7 +286,10 @@ private fun NotificationDetailSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "subject") {
-                Text(notification.subject, style = MaterialTheme.typography.titleMedium)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(notification.subject, style = MaterialTheme.typography.titleLarge)
+                    MetaText(formatMoodleDateTime(notification.timecreated))
+                }
             }
             item(key = "body") {
                 if (fullHtml != null) {

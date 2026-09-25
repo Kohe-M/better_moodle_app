@@ -2,6 +2,7 @@ package dev.rits.bettermoodle
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -34,8 +35,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +55,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.rits.bettermoodle.auth.SsoLogin
+import dev.rits.bettermoodle.data.AuthState
 import dev.rits.bettermoodle.data.ForumTarget
 import dev.rits.bettermoodle.data.MoodleUrlTarget
 import dev.rits.bettermoodle.data.PageTarget
@@ -59,6 +63,7 @@ import dev.rits.bettermoodle.data.PreviewKind
 import dev.rits.bettermoodle.data.QuizTarget
 import dev.rits.bettermoodle.data.UrlPolicy
 import dev.rits.bettermoodle.data.parseMoodleUrlTarget
+import dev.rits.bettermoodle.data.previewKindFor
 import dev.rits.bettermoodle.ui.AssignmentScreen
 import dev.rits.bettermoodle.ui.CourseScreen
 import dev.rits.bettermoodle.ui.CourseListScreen
@@ -77,6 +82,7 @@ import dev.rits.bettermoodle.ui.SyllabusScreen
 import dev.rits.bettermoodle.ui.TimetableScreen
 import dev.rits.bettermoodle.ui.openInCustomTab
 import dev.rits.bettermoodle.ui.theme.BetterMoodleTheme
+import dev.rits.bettermoodle.work.DeadlineWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.net.URI
@@ -92,10 +98,38 @@ class MainActivity : ComponentActivity() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         val container = (application as App).container
+        // cold start・プロセス再生成・既存Activityへの onNewIntent のどれでも同じ経路で宛先を保持し、
+        // ログイン後に Root が消費する。savedInstanceState がある = プロセス再生成による再配達なので、
+        // 消費済みキー (DataStore) と照合して二重に開かない。新規起動は利用者の明示的な操作として扱う
+        consumeDeepLink(intent, explicit = savedInstanceState == null)
         setContent {
             BetterMoodleTheme {
                 Root(container)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // 既存Activityへの配達は利用者がいまタップした通知
+        consumeDeepLink(intent, explicit = true)
+    }
+
+    private fun consumeDeepLink(intent: Intent?, explicit: Boolean) {
+        val link = pendingDeepLinkFrom(intent, explicit) ?: return
+        (application as App).container.pendingDeepLink.value = link
+    }
+
+    companion object {
+        /** 通知Intentの宛先を検証して取り出す。外部から任意URLを流し込めないようMoodleホストに限定する。 */
+        fun pendingDeepLinkFrom(intent: Intent?, explicit: Boolean): PendingDeepLink? {
+            val raw = intent?.getStringExtra(DeadlineWorker.EXTRA_OPEN_URL)?.takeIf { it.isNotBlank() } ?: return null
+            val url = UrlPolicy.normalizeMoodleUrl(raw)
+            if (!UrlPolicy.isAllowedMoodleWebViewUrl(url)) return null
+            val title = intent.getStringExtra(DeadlineWorker.EXTRA_OPEN_TITLE).orEmpty().ifBlank { "課題" }
+            val key = intent.getStringExtra(DeadlineWorker.EXTRA_OPEN_KEY).orEmpty().ifBlank { url }
+            return PendingDeepLink(url, title, key, explicit)
         }
     }
 }
@@ -113,35 +147,65 @@ private fun NavHostController.navigateFromUser(route: String) {
 
 @Composable
 private fun Root(container: AppContainer) {
-    val token by container.sessionStore.tokenFlow.collectAsState(initial = "INIT")
+    // tokenFlow ではなく authState を見る: MoodleClient のトークンキャッシュ更新後に発行されるため、
+    // 認証済み画面の最初のリクエストが notoken で失敗しない
+    val auth by container.authState.collectAsState()
     val scope = rememberCoroutineScope()
-    val context = androidx.compose.ui.platform.LocalContext.current
 
-    when (token) {
-        "INIT" -> return // DataStore読み込み待ち
-        null -> {
+    when (val a = auth) {
+        AuthState.Unknown -> return // DataStore読み込み待ち
+        AuthState.LoggedOut -> {
+            // 永続化と状態更新はセッション管理側 (アプリ scope) が排他して行う
             LoginScreen(onToken = { tokens: SsoLogin.Tokens ->
-                scope.launch {
-                    container.sessionStore.saveLogin(tokens.wsToken, tokens.privateToken)
-                }
+                container.authSession.login(tokens.wsToken, tokens.privateToken)
             })
             return
         }
+        // 世代ごとにNavHostを作り直す (別アカウントで再ログインしたときに前の画面スタックを残さない)
+        is AuthState.LoggedIn -> key(a.generation) { LoggedInRoot(container) }
     }
+}
+
+@Composable
+private fun LoggedInRoot(container: AppContainer) {
+    val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     val rootNav = rememberNavController()
-    fun openUrl(url: String, title: String) {
+    /**
+     * URLをネイティブ画面/WebView/外部ブラウザへ振り分ける。
+     * [fromUser] が false (通知タップ等) のときは遷移アニメーション中のガードを通さない
+     * (cold start 直後はまだ RESUMED でないため、ガードすると宛先が捨てられる)。
+     */
+    fun openUrl(url: String, title: String, fromUser: Boolean = true) {
         val normalized = UrlPolicy.normalizeMoodleUrl(url)
         scope.launch {
-            val nativeRoute = resolveNativeRoute(container, normalized, title)
+            val nativeRoute = pluginFileRoute(normalized, title) ?: resolveNativeRoute(container, normalized, title)
+            val go: (String) -> Unit = { route -> if (fromUser) rootNav.navigateFromUser(route) else rootNav.navigate(route) }
             when {
-                nativeRoute != null -> rootNav.navigateFromUser(nativeRoute)
+                nativeRoute != null -> go(nativeRoute)
                 UrlPolicy.isAllowedMoodleWebViewUrl(normalized) ->
-                    rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(normalized)}&title=${Uri.encode(title)}")
+                    go("moodleWeb?url=${Uri.encode(normalized)}&title=${Uri.encode(title)}")
                 UrlPolicy.canOpenExternally(normalized) -> openInCustomTab(context, normalized)
                 else -> showUnhandledUrl(context, normalized)
             }
         }
+    }
+
+    // 通知タップなどの宛先はログイン後に消費する。
+    // - Effect のキー (pendingLink) は処理が終わるまで変えない (途中で null にすると自分がキャンセルされ、
+    //   宛先も失われる)。DataStore 処理中に中断されても宛先は残り、再コンポーズ時にやり直せる
+    // - 遷移要求 → 消費済み記録 → 宛先クリア の順。記録前に中断されても「開いていないのに消費済み」にならない
+    // - OS の再配達 (explicit=false) だけを消費済みキーで抑止し、明示的な再タップは常に開く
+    val pendingLink by container.pendingDeepLink.collectAsState()
+    LaunchedEffect(pendingLink) {
+        val link = pendingLink ?: return@LaunchedEffect
+        val redelivered = !link.explicit && container.sessionStore.consumedDeepLinkKey() == link.key
+        if (!redelivered) {
+            openUrl(link.url, link.title, fromUser = false)
+            container.sessionStore.markDeepLinkConsumed(link.key)
+        }
+        container.pendingDeepLink.compareAndSet(link, null)
     }
 
     NavHost(navController = rootNav, startDestination = "main") {
@@ -200,7 +264,7 @@ private fun Root(container: AppContainer) {
                 onOpenMoodleWeb = { url, title ->
                     rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(title)}")
                 },
-                onOpenUrl = ::openUrl,
+                onOpenUrl = { url, title -> openUrl(url, title) },
             )
         }
 
@@ -223,7 +287,7 @@ private fun Root(container: AppContainer) {
                 assignId = entry.arguments?.getString("assignId")?.toLongOrNull() ?: 0L,
                 title = entry.arguments?.getString("title") ?: "課題",
                 onBack = { rootNav.popBackStack() },
-                onOpenUrl = ::openUrl,
+                onOpenUrl = { url, title -> openUrl(url, title) },
                 onOpenFilePreview = { file ->
                     val url = file.sourceUrl ?: return@AssignmentScreen
                     when (file.previewKind) {
@@ -240,6 +304,9 @@ private fun Root(container: AppContainer) {
                         PreviewKind.Html,
                         PreviewKind.Unsupported -> Unit
                     }
+                },
+                onOpenMoodleWeb = { url, webTitle ->
+                    rootNav.navigateFromUser("moodleWeb?url=${Uri.encode(url)}&title=${Uri.encode(webTitle)}")
                 },
             )
         }
@@ -271,7 +338,7 @@ private fun Root(container: AppContainer) {
                 target = target,
                 title = entry.arguments?.getString("title") ?: "フォーラム",
                 onBack = { rootNav.popBackStack() },
-                onOpenUrl = ::openUrl,
+                onOpenUrl = { url, title -> openUrl(url, title) },
                 onFallbackWeb = {
                     val url = target.url
                     if (!url.isNullOrBlank()) {
@@ -288,7 +355,7 @@ private fun Root(container: AppContainer) {
                 title = entry.arguments?.getString("title") ?: "フォーラム",
                 fallbackUrl = entry.arguments?.getString("url").orEmpty(),
                 onBack = { rootNav.popBackStack() },
-                onOpenUrl = ::openUrl,
+                onOpenUrl = { url, title -> openUrl(url, title) },
                 onFallbackWeb = { url, fallbackTitle ->
                     if (url.isNotBlank()) {
                         rootNav.navigateFromUser(
@@ -313,7 +380,7 @@ private fun Root(container: AppContainer) {
                 target = target,
                 title = entry.arguments?.getString("title") ?: "小テスト",
                 onBack = { rootNav.popBackStack() },
-                onOpenUrl = ::openUrl,
+                onOpenUrl = { url, title -> openUrl(url, title) },
                 onFallbackWeb = {
                     val url = target.url
                     if (!url.isNullOrBlank()) {
@@ -352,7 +419,7 @@ private fun Root(container: AppContainer) {
                             "&kind=${Uri.encode(kind.name)}",
                     )
                 },
-                onOpenUrl = ::openUrl,
+                onOpenUrl = { url, title -> openUrl(url, title) },
             )
         }
 
@@ -463,6 +530,24 @@ private suspend fun resolveNativeRoute(
     }
 }
 
+/**
+ * pluginfile の画像・PDF・テキストはWebViewではなくアプリ内プレビューで開く
+ * (課題説明やフォーラム本文の画像リンクの逃げ道)。対象外なら null。
+ */
+private fun pluginFileRoute(url: String, title: String): String? {
+    if (!UrlPolicy.isSafeMoodlePluginFileSourceUrl(url)) return null
+    val filename = runCatching { URI(url).path }.getOrNull()?.substringAfterLast('/')?.let { Uri.decode(it) }.orEmpty()
+    if (filename.isBlank()) return null
+    val label = title.ifBlank { filename }
+    return when (previewKindFor(filename, null)) {
+        PreviewKind.Pdf -> "pdf?url=${Uri.encode(url)}&title=${Uri.encode(label)}"
+        PreviewKind.Image,
+        PreviewKind.Text,
+        -> "filePreview?url=${Uri.encode(url)}&title=${Uri.encode(label)}&kind=${Uri.encode(previewKindFor(filename, null).name)}"
+        else -> null
+    }
+}
+
 private fun forumDiscussionRoute(discussionId: Long, title: String, url: String): String =
     "forumDiscussion?discussionId=$discussionId" +
         "&title=${Uri.encode(title)}" +
@@ -539,7 +624,7 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
     fun openUrl(url: String, title: String) {
         val normalized = UrlPolicy.normalizeMoodleUrl(url)
         scope.launch {
-            val nativeRoute = resolveNativeRoute(container, normalized, title)
+            val nativeRoute = pluginFileRoute(normalized, title) ?: resolveNativeRoute(container, normalized, title)
             when {
                 nativeRoute != null -> rootNav.navigateFromUser(nativeRoute)
                 UrlPolicy.isAllowedMoodleWebViewUrl(normalized) ->
@@ -556,7 +641,7 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
                 title = {
                     Text(
                         items.firstOrNull { it.route == currentRoute }?.label ?: "Moodle+R",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleLarge,
                     )
                 },
                 actions = {
@@ -574,15 +659,16 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
                         Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "ログアウト")
                     }
                 },
-                expandedHeight = 48.dp,
+                expandedHeight = 52.dp,
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.primary,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 ),
             )
         },
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
                 items.forEach { item ->
                     NavigationBarItem(
                         selected = currentRoute == item.route,
@@ -596,9 +682,11 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
                         icon = { Icon(item.icon, contentDescription = item.label) },
                         label = { Text(item.label) },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                            indicatorColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         ),
                     )
                 }
@@ -614,7 +702,7 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
             composable("deadlines") {
                 DeadlinesScreen(
                     container = container,
-                    onOpenUrl = ::openUrl,
+                    onOpenUrl = { url, title -> openUrl(url, title) },
                     onOpenAssignment = { courseId, moduleId, assignId, title ->
                         rootNav.navigateFromUser(
                             "assignment/$courseId/$moduleId/$assignId?title=${Uri.encode(title)}",
@@ -661,7 +749,8 @@ private fun MainTabs(container: AppContainer, rootNav: NavHostController) {
             confirmButton = {
                 TextButton(onClick = {
                     showLogout = false
-                    scope.launch { container.logout() }
+                    // 画面 scope ではなくセッション管理側が完了まで所有する
+                    container.logout()
                 }) { Text("ログアウト") }
             },
             dismissButton = {

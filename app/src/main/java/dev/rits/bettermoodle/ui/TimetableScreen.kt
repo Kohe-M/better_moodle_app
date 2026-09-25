@@ -11,9 +11,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,6 +43,7 @@ import dev.rits.bettermoodle.data.TimetableEntry
 import dev.rits.bettermoodle.data.timetableCellsConnected
 import dev.rits.bettermoodle.data.timetableRunStartPeriod
 import java.time.LocalDate
+import androidx.compose.material.icons.outlined.CalendarMonth
 
 /**
  * 時間割画面。スクロールなしで全コマを1画面に表示する (一覧性重視)。
@@ -54,12 +61,16 @@ fun TimetableScreen(
         is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
         is UiState.Success -> {
             if (s.data.entries.isEmpty()) {
-                ErrorBox(
+                EmptyBox(
                     "時間割ブロックを取得できませんでした。\nMoodleのダッシュボードに時間割ブロックが表示されているか確認してください。",
                     onRetry = refresh,
+                    icon = Icons.Outlined.CalendarMonth,
                 )
             } else {
-                TimetableGrid(s.data, onOpenCourse)
+                Column(Modifier.fillMaxSize()) {
+                    StaleDataBanner(s, onRetry = refresh)
+                    TimetableGrid(s.data, onOpenCourse, onRefresh = refresh, refreshing = s.refreshing)
+                }
             }
         }
     }
@@ -69,6 +80,8 @@ fun TimetableScreen(
 private fun TimetableGrid(
     timetable: Timetable,
     onOpenCourse: (Long, String, String?) -> Unit,
+    onRefresh: () -> Unit,
+    refreshing: Boolean,
 ) {
     val maxPeriod = maxOf(timetable.entries.maxOfOrNull { it.period } ?: 5, 5)
     val todayIndex = LocalDate.now().dayOfWeek.value - 1 // 0=月
@@ -85,7 +98,19 @@ private fun TimetableGrid(
     ) {
         // 曜日ヘッダ
         Row(modifier = Modifier.fillMaxWidth().height(34.dp)) {
-            Box(Modifier.width(36.dp))
+            Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
+                if (refreshing) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
+                    IconButton(onClick = onRefresh, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            Icons.Filled.Refresh,
+                            contentDescription = "時間割を更新",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
             timetable.dayLabels.forEachIndexed { i, label ->
                 HeaderCell(label, Modifier.weight(1f), highlight = i == todayIndex)
             }
@@ -135,7 +160,7 @@ private fun HeaderCell(text: String, modifier: Modifier, highlight: Boolean) {
             .clip(RoundedCornerShape(8.dp))
             .background(
                 if (highlight) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.surfaceVariant,
+                else MaterialTheme.colorScheme.surfaceContainerHigh,
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -144,7 +169,7 @@ private fun HeaderCell(text: String, modifier: Modifier, highlight: Boolean) {
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
             color = if (highlight) MaterialTheme.colorScheme.onPrimary
-            else MaterialTheme.colorScheme.onSurfaceVariant,
+            else MaterialTheme.colorScheme.onSurface,
         )
     }
 }
@@ -203,9 +228,9 @@ private fun SubjectCell(
             )
             .background(
                 when {
-                    entry == null -> MaterialTheme.colorScheme.surface
+                    entry == null -> MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f)
                     highlight -> MaterialTheme.colorScheme.primaryContainer
-                    else -> MaterialTheme.colorScheme.secondaryContainer
+                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
                 },
             )
             .clickable(
@@ -232,7 +257,7 @@ private fun SubjectCell(
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
                     color = if (highlight) MaterialTheme.colorScheme.onPrimaryContainer
-                    else MaterialTheme.colorScheme.onSecondaryContainer,
+                    else MaterialTheme.colorScheme.onSurface,
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -249,7 +274,7 @@ private fun SubjectCell(
                         modifier = Modifier
                             .padding(top = 3.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.45f))
                             .padding(horizontal = 4.dp, vertical = 1.dp),
                     )
                 }

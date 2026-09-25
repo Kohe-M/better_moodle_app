@@ -27,6 +27,7 @@ enum class AssignmentAvailabilityLabel(val text: String) {
 }
 
 enum class AssignmentAction {
+    /** 制限時間付き課題の計測開始 (mod_assign_start_submission)。通常課題では出さない */
     Start,
     Edit,
     FinalSubmit,
@@ -42,6 +43,8 @@ enum class PreviewKind {
 
 data class SubmittedFileUi(
     val filename: String,
+    /** draft内ディレクトリ ("/" または "/sub/")。同名ファイルの識別に使う */
+    val filepath: String,
     val typeLabel: String,
     val sizeBytes: Long,
     val modifiedAt: Long,
@@ -57,9 +60,19 @@ data class AssignmentUiModel(
     val canEdit: Boolean,
     val canSubmit: Boolean,
     val submissionStatementRequired: Boolean,
+    /** 提出確認文 (HTML)。空なら確認文なし */
+    val submissionStatement: String,
+    /** 制限時間付き課題 */
+    val hasTimeLimit: Boolean,
+    /** 制限時間付きで、まだ計測開始していない */
+    val needsStart: Boolean,
     val actions: List<AssignmentAction>,
     val files: List<SubmittedFileUi>,
     val onlineText: String?,
+    /** 既存の文章が段落・改行以外の書式を含む (プレーンテキスト編集では書式が失われる) */
+    val onlineTextIsRich: Boolean,
+    /** グループ提出など、このアプリでは扱わない設定の課題 */
+    val unsupportedReason: String?,
 )
 
 fun buildAssignmentUiModel(
@@ -100,29 +113,42 @@ fun buildAssignmentUiModel(
         else -> AssignmentAvailabilityLabel.Unknown
     }
 
+    // 制限時間付き課題は開始APIで計測を始めるまで編集できない。通常課題は canedit だけで判定する
+    // (mod_assign_start_submission は通常課題では timelimitnotenabled warning を返す)。
+    val hasTimeLimit = assignment.hasTimeLimit
+    val started = (last?.submission?.timestarted ?: 0L) > 0L
+    val needsStart = hasTimeLimit && !started && submission == AssignmentSubmissionLabel.NotSubmitted
+    val unsupportedReason = when {
+        assignment.teamsubmission == 1 -> "グループ提出の課題はこのアプリから提出できません。Moodleで提出してください。"
+        else -> null
+    }
+
     val actions = buildList {
+        if (unsupportedReason != null) return@buildList
         if (overdue && !canEdit && !canSubmit) return@buildList
         when {
-            submission == AssignmentSubmissionLabel.NotSubmitted && last?.submissionsenabled == true ->
-                add(AssignmentAction.Start)
-            submission == AssignmentSubmissionLabel.Draft && canEdit ->
-                add(AssignmentAction.Edit)
-            submission == AssignmentSubmissionLabel.Submitted && canEdit ->
-                add(AssignmentAction.Edit)
+            needsStart && last?.submissionsenabled == true -> add(AssignmentAction.Start)
+            canEdit -> add(AssignmentAction.Edit)
         }
         if (canSubmit && submission != AssignmentSubmissionLabel.Submitted) add(AssignmentAction.FinalSubmit)
     }
 
+    val onlineText = extractOnlineText(status).takeIf { it.isNotBlank() }
     return AssignmentUiModel(
         submission = submission,
         grading = grading,
         availability = availability,
         canEdit = canEdit,
         canSubmit = canSubmit,
-        submissionStatementRequired = assignment.submissionstatement.isNotBlank(),
+        submissionStatementRequired = assignment.requiresubmissionstatement == 1 || assignment.submissionstatement.isNotBlank(),
+        submissionStatement = assignment.submissionstatement,
+        hasTimeLimit = hasTimeLimit,
+        needsStart = needsStart,
         actions = actions,
         files = extractSubmittedFiles(status),
-        onlineText = extractOnlineText(status).takeIf { it.isNotBlank() },
+        onlineText = onlineText,
+        onlineTextIsRich = OnlineTextFormat.isRichHtml(onlineText),
+        unsupportedReason = unsupportedReason,
     )
 }
 
@@ -137,17 +163,22 @@ fun extractOnlineText(status: SubmissionStatusResponse): String =
 fun hasNumericGrade(grade: String?): Boolean =
     grade?.trim()?.toDoubleOrNull()?.let { it >= 0.0 } == true
 
-fun extractSubmittedFiles(status: SubmissionStatusResponse): List<SubmittedFileUi> =
+/** 提出済みファイル (draft引き継ぎ用の生DTO) */
+fun extractSubmittedMoodleFiles(status: SubmissionStatusResponse): List<MoodleFile> =
     status.lastattempt?.submission?.plugins
         .orEmpty()
         .filter { it.type == "file" }
         .flatMap { it.fileareas }
         .flatMap { it.files }
+
+fun extractSubmittedFiles(status: SubmissionStatusResponse): List<SubmittedFileUi> =
+    extractSubmittedMoodleFiles(status)
         .map { file ->
             SubmittedFileUi(
                 filename = file.filename,
+                filepath = MoodleClient.normalizeDraftPath(file.filepath),
                 typeLabel = file.mimetype?.substringAfter('/')?.uppercase() ?: "FILE",
-                sizeBytes = file.filesize,
+                sizeBytes = file.filesize ?: -1L,
                 modifiedAt = file.timemodified,
                 sourceUrl = file.fileurl,
                 mimeType = file.mimetype,
@@ -155,11 +186,18 @@ fun extractSubmittedFiles(status: SubmissionStatusResponse): List<SubmittedFileU
             )
         }
 
+private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "heif")
+
+/**
+ * ファイル名と MIME からプレビュー種別を決める。MIME が無い (HTML内リンク等) 場合は拡張子で判定する。
+ * 実際の応答種別 (Content-Type) の検証はプレビュー画面側で行う。
+ */
 fun previewKindFor(filename: String, mimeType: String?): PreviewKind {
     val lower = filename.lowercase()
+    val extension = lower.substringAfterLast('.', missingDelimiterValue = "")
     return when {
         mimeType == "application/pdf" || lower.endsWith(".pdf") -> PreviewKind.Pdf
-        mimeType.orEmpty().startsWith("image/") -> PreviewKind.Image
+        mimeType.orEmpty().startsWith("image/") || (mimeType.isNullOrBlank() && extension in IMAGE_EXTENSIONS) -> PreviewKind.Image
         mimeType == "text/html" || lower.endsWith(".html") || lower.endsWith(".htm") -> PreviewKind.Html
         mimeType.orEmpty().startsWith("text/") ||
             lower.endsWith(".txt") ||

@@ -2,6 +2,7 @@ package dev.rits.bettermoodle.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,9 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -32,7 +30,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.BuildConfig
@@ -56,6 +53,7 @@ import dev.rits.bettermoodle.data.quizMoodleErrorCode
 import dev.rits.bettermoodle.data.quizTimeLimitLabel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import androidx.compose.ui.Alignment
 
 private data class QuizUiData(
     val quiz: Quiz,
@@ -145,6 +143,7 @@ fun QuizScreen(
                         Icon(Icons.Filled.Refresh, contentDescription = "再読み込み")
                     }
                 },
+                colors = appTopBarColors(),
             )
         },
     ) { padding ->
@@ -186,11 +185,15 @@ private fun QuizContent(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(quiz.name, style = MaterialTheme.typography.headlineSmall)
-        HtmlText(
-            html = quiz.intro,
-            onOpenUrl = { onOpenUrl(it, quiz.name) },
-            style = MaterialTheme.typography.bodyMedium,
-        )
+        QuizStatusHero(quiz = quiz, access = data.access, bestGrade = data.bestGrade)
+        if (htmlHasRenderableContent(quiz.intro)) {
+            SubsectionTitle("説明")
+            HtmlText(
+                html = quiz.intro,
+                onOpenUrl = { onOpenUrl(it, quiz.name) },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
 
         QuizSummaryCard(quiz = quiz, bestGrade = data.bestGrade)
         QuizAttemptsCard(data.attempts)
@@ -206,18 +209,45 @@ private fun QuizContent(
     }
 }
 
+/** 受験可否と受付終了をまず見せる。受験できない場合は理由を [QuizAccessBlock] で説明する。 */
+@Composable
+private fun QuizStatusHero(quiz: Quiz, access: QuizAccessInformationResponse, bestGrade: QuizBestGradeResponse) {
+    val c = MaterialTheme.colorScheme
+    val canAttempt = access.canattempt
+    val container = if (canAttempt) c.primaryContainer else c.surfaceContainerHigh
+    val onContainer = if (canAttempt) c.onPrimaryContainer else c.onSurface
+    AppCard(containerColor = container, contentColor = onContainer, border = null) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("受付終了", style = MaterialTheme.typography.labelMedium, color = onContainer.copy(alpha = 0.8f))
+            Text(formatQuizTime(quiz.timeclose), style = MaterialTheme.typography.titleLarge, color = onContainer)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+                StatusPill(
+                    if (canAttempt) "受験できます" else "現在は受験できません",
+                    containerColor = if (canAttempt) c.primary else c.outline,
+                    contentColor = if (canAttempt) c.onPrimary else c.surface,
+                )
+                if (bestGrade.hasgrade) {
+                    StatusPill(
+                        "最高 ${quizGradeLabel(bestGrade.grade)} / ${quizGradeLabel(quiz.grade)}",
+                        containerColor = onContainer.copy(alpha = 0.12f),
+                        contentColor = onContainer,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun QuizSummaryCard(quiz: Quiz, bestGrade: QuizBestGradeResponse) {
-    ElevatedCard(
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
+    SubsectionTitle("詳細")
+    AppCard {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("小テストサマリー", style = MaterialTheme.typography.titleMedium)
-            SummaryLine("受験可能期間", "${formatQuizTime(quiz.timeopen)}〜${formatQuizTime(quiz.timeclose)}")
+            SummaryLine("受験開始", formatQuizTime(quiz.timeopen))
+            SummaryLine("受験終了", formatQuizTime(quiz.timeclose), emphasis = true)
             SummaryLine("制限時間", quizTimeLimitLabel(quiz.timelimit))
             SummaryLine("受験可能回数", quizAttemptsLimitLabel(quiz.attempts))
             SummaryLine("評定方法", quizGradeMethodLabel(quiz.grademethod))
@@ -230,18 +260,24 @@ private fun QuizSummaryCard(quiz: Quiz, bestGrade: QuizBestGradeResponse) {
 
 @Composable
 private fun QuizAttemptsCard(attempts: List<QuizAttempt>) {
-    Text("これまでの受験", style = MaterialTheme.typography.titleMedium)
+    SubsectionTitle("これまでの受験")
     if (attempts.isEmpty()) {
-        Text("受験履歴はありません", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "受験履歴はありません",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         return
     }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(ListItemSpacing)) {
         attempts.forEach { attempt ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("${attempt.attempt}回目", fontWeight = FontWeight.Bold)
-                    Text("状態: ${quizAttemptStateLabel(attempt.state)}")
-                    Text("終了日時: ${formatQuizTime(attempt.timefinish)}")
+            AppCard {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("${attempt.attempt}回目", style = MaterialTheme.typography.titleSmall)
+                        MetaText("終了: ${formatQuizTime(attempt.timefinish)}")
+                    }
+                    StatusPill(quizAttemptStateLabel(attempt.state))
                 }
             }
         }
@@ -251,20 +287,19 @@ private fun QuizAttemptsCard(attempts: List<QuizAttempt>) {
 @Composable
 private fun QuizAccessBlock(access: QuizAccessInformationResponse) {
     if (access.canattempt && access.preventaccessreasons.isEmpty()) return
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            if (access.canattempt) "受験時の注意" else "現在は受験できません",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        access.preventaccessreasons.forEach { reason ->
-            Text(reason, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (!access.canattempt) {
-            Text(
-                "サーバ側が最終判断するため、Moodle画面を開く操作は残しています。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    SubsectionTitle(if (access.canattempt) "受験時の注意" else "受験できない理由")
+    AppCard(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            access.preventaccessreasons.forEach { reason ->
+                Text(reason, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (!access.canattempt) {
+                Text(
+                    "サーバ側が最終判断するため、Moodle画面を開く操作は残しています。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -300,7 +335,7 @@ private fun QuizErrorContent(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            AppCard(modifier = Modifier.padding(top = 8.dp)) {
                 Text(
                     diagnostic.toSafeText(),
                     style = MaterialTheme.typography.bodySmall,

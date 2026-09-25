@@ -4,7 +4,6 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.webkit.MimeTypeMap
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -26,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.UrlPolicy
+import dev.rits.bettermoodle.data.useResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -65,10 +65,9 @@ fun DownloadShareDialog(
                     fileUrl = fileUrl,
                     filename = filename,
                     mimeType = mimeType,
+                    // Compose の snapshot state はバックグラウンドスレッドから更新してよい
                     onProgress = { downloaded, total ->
-                        withContext(Dispatchers.Main.immediate) {
-                            state = DownloadShareState.Downloading(downloaded, total)
-                        }
+                        state = DownloadShareState.Downloading(downloaded, total)
                     },
                 )
             }.getOrElse { error ->
@@ -142,7 +141,7 @@ private suspend fun downloadSharedFile(
     fileUrl: String,
     filename: String,
     mimeType: String?,
-    onProgress: suspend (downloadedBytes: Long, totalBytes: Long?) -> Unit,
+    onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
 ): DownloadShareState.Ready {
     if (!UrlPolicy.isSafeMoodlePluginFileSourceUrl(fileUrl)) {
         throw IOException("許可されていないファイルURLです。")
@@ -159,8 +158,8 @@ private suspend fun downloadSharedFile(
     val tmp = File.createTempFile("download_", ".tmp", downloadsDir)
     val out = uniqueDownloadFile(downloadsDir, safeName)
 
-    return runCatching {
-        downloadShareHttp.newCall(Request.Builder().url(authed).build()).execute().use { resp ->
+    return try {
+        downloadShareHttp.newCall(Request.Builder().url(authed).build()).useResponse { resp ->
             if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
             val body = resp.body ?: throw IOException("空のレスポンスです。")
             val length = body.contentLength().takeIf { it >= 0L }
@@ -203,7 +202,7 @@ private suspend fun downloadSharedFile(
             }
             DownloadShareState.Ready(out, resolvedMime)
         }
-    }.getOrElse { error ->
+    } catch (error: Throwable) {
         tmp.delete()
         out.delete()
         throw error
@@ -222,11 +221,15 @@ fun openOrShareDownloadedFile(
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         clipData = ClipData.newUri(context.contentResolver, title, uri)
     }
-    if (context.packageManager.queryIntentActivities(viewIntent, PackageManager.MATCH_DEFAULT_ONLY).isNotEmpty()) {
-        return runCatching {
-            context.startActivity(viewIntent)
-            true
-        }.getOrDefault(false)
+    // Android 11以降は package visibility の制約で queryIntentActivities がビューアを返さないことがある。
+    // 照会せずに ACTION_VIEW を実行し、ActivityNotFoundException のときだけ共有へフォールバックする。
+    try {
+        context.startActivity(viewIntent)
+        return true
+    } catch (_: ActivityNotFoundException) {
+        // ビューアなし → 共有シートへ
+    } catch (_: SecurityException) {
+        // 起動先が拒否 → 共有シートへ
     }
 
     val sendIntent = Intent(Intent.ACTION_SEND).apply {

@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.PreviewKind
 import dev.rits.bettermoodle.data.UrlPolicy
+import dev.rits.bettermoodle.data.useResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -91,6 +92,7 @@ fun FilePreviewScreen(
                         Icon(Icons.Filled.Share, contentDescription = "他のアプリで開く")
                     }
                 },
+                colors = appCenterTopBarColors(),
             )
         },
     ) { padding ->
@@ -151,7 +153,7 @@ private const val MAX_IMAGE_BYTES = 10L * 1024L * 1024L
 private const val MAX_TEXT_BYTES = 1024L * 1024L
 private const val MAX_IMAGE_PIXELS = 4_000_000
 
-private fun loadImagePreview(container: AppContainer, fileUrl: String): FilePreviewState {
+private suspend fun loadImagePreview(container: AppContainer, fileUrl: String): FilePreviewState {
     val bytes = downloadPreviewBytes(container, fileUrl, MAX_IMAGE_BYTES, rejectHtml = true)
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
@@ -166,14 +168,14 @@ private fun loadImagePreview(container: AppContainer, fileUrl: String): FilePrev
     return FilePreviewState.ImageReady(bitmap)
 }
 
-private fun loadTextPreview(container: AppContainer, fileUrl: String): FilePreviewState {
+private suspend fun loadTextPreview(container: AppContainer, fileUrl: String): FilePreviewState {
     val bytes = downloadPreviewBytes(container, fileUrl, MAX_TEXT_BYTES, rejectHtml = true)
     val text = bytes.toString(Charsets.UTF_8)
     if (looksLikeHtml(text)) throw java.io.IOException("HTMLレスポンスはテキスト提出物として表示できません。")
     return FilePreviewState.TextReady(text)
 }
 
-internal fun downloadPreviewBytes(
+internal suspend fun downloadPreviewBytes(
     container: AppContainer,
     fileUrl: String,
     maxBytes: Long,
@@ -187,7 +189,8 @@ internal fun downloadPreviewBytes(
     if (!UrlPolicy.isAllowedMoodlePluginFileUrl(authed)) {
         throw java.io.IOException("許可されていないファイルURLです。")
     }
-    filePreviewHttp.newCall(Request.Builder().url(authed).build()).execute().use { resp ->
+    // 画面離脱で本文読み取りも中断する
+    return filePreviewHttp.newCall(Request.Builder().url(authed).build()).useResponse { resp ->
         if (!resp.isSuccessful) throw java.io.IOException("HTTP ${resp.code}")
         val contentType = resp.header("Content-Type").orEmpty().lowercase()
         if (rejectHtml && contentType.contains("text/html")) {
@@ -208,7 +211,7 @@ internal fun downloadPreviewBytes(
                 out.write(buffer, 0, read)
             }
         }
-        return out.toByteArray()
+        out.toByteArray()
     }
 }
 

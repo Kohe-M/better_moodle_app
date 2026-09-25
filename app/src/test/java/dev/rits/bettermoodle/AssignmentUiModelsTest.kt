@@ -12,6 +12,7 @@ import dev.rits.bettermoodle.data.AssignmentSubmissionLabel
 import dev.rits.bettermoodle.data.AssignmentAvailabilityLabel
 import dev.rits.bettermoodle.data.MoodleFile
 import dev.rits.bettermoodle.data.PreviewKind
+import dev.rits.bettermoodle.data.SubmissionEditorField
 import dev.rits.bettermoodle.data.SubmissionFileArea
 import dev.rits.bettermoodle.data.SubmissionPlugin
 import dev.rits.bettermoodle.data.SubmissionStatusResponse
@@ -158,5 +159,88 @@ class AssignmentUiModelsTest {
         assertEquals(PreviewKind.Html, previewKindFor("index.html", null))
         assertEquals(PreviewKind.Html, previewKindFor("page.bin", "text/html"))
         assertEquals(PreviewKind.Unsupported, previewKindFor("slides.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+    }
+}
+
+class AssignmentActionRulesTest {
+
+    private fun status(status: String, canEdit: Boolean, canSubmit: Boolean, timestarted: Long? = null) =
+        SubmissionStatusResponse(
+            lastattempt = AssignmentLastAttempt(
+                submissionsenabled = true,
+                canedit = canEdit,
+                cansubmit = canSubmit,
+                submission = AssignmentSubmission(status = status, timestarted = timestarted),
+            ),
+        )
+
+    @Test
+    fun `normal assignment is editable from not-submitted without start api`() {
+        val ui = buildAssignmentUiModel(
+            assignment = Assignment(duedate = 2_000, configs = listOf(AssignmentConfig("onlinetext", "", "enabled", "1"))),
+            status = status("new", canEdit = true, canSubmit = false),
+            nowEpochSeconds = 1_000,
+        )
+        assertEquals(AssignmentSubmissionLabel.NotSubmitted, ui.submission)
+        assertTrue(AssignmentAction.Edit in ui.actions)
+        assertFalse("通常課題では開始APIを呼ばない", AssignmentAction.Start in ui.actions)
+        assertFalse(ui.needsStart)
+    }
+
+    @Test
+    fun `time limited assignment needs explicit start before editing`() {
+        val ui = buildAssignmentUiModel(
+            assignment = Assignment(duedate = 2_000, timelimit = 600),
+            status = status("new", canEdit = false, canSubmit = false),
+            nowEpochSeconds = 1_000,
+        )
+        assertTrue(ui.hasTimeLimit)
+        assertTrue(ui.needsStart)
+        assertEquals(listOf(AssignmentAction.Start), ui.actions)
+
+        val started = buildAssignmentUiModel(
+            assignment = Assignment(duedate = 2_000, timelimit = 600),
+            status = status("new", canEdit = true, canSubmit = true, timestarted = 1_500),
+            nowEpochSeconds = 1_000,
+        )
+        assertFalse(started.needsStart)
+        assertTrue(AssignmentAction.Edit in started.actions)
+        assertFalse(AssignmentAction.Start in started.actions)
+    }
+
+    @Test
+    fun `team submission is flagged unsupported with no native actions`() {
+        val ui = buildAssignmentUiModel(
+            assignment = Assignment(duedate = 2_000, teamsubmission = 1),
+            status = status("new", canEdit = true, canSubmit = true),
+            nowEpochSeconds = 1_000,
+        )
+        assertTrue(ui.actions.isEmpty())
+        assertTrue(ui.unsupportedReason!!.contains("グループ提出"))
+    }
+
+    @Test
+    fun `submission statement text and rich text flag are exposed`() {
+        val ui = buildAssignmentUiModel(
+            assignment = Assignment(requiresubmissionstatement = 1, submissionstatement = "<p>これは自分の作品です</p>"),
+            status = SubmissionStatusResponse(
+                lastattempt = AssignmentLastAttempt(
+                    canedit = true,
+                    submission = AssignmentSubmission(
+                        status = "draft",
+                        plugins = listOf(
+                            SubmissionPlugin(
+                                type = "onlinetext",
+                                editorfields = listOf(SubmissionEditorField(text = "<p>x <img src=\"a.png\"></p>")),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            nowEpochSeconds = 1_000,
+        )
+        assertTrue(ui.submissionStatementRequired)
+        assertEquals("<p>これは自分の作品です</p>", ui.submissionStatement)
+        assertTrue(ui.onlineTextIsRich)
     }
 }

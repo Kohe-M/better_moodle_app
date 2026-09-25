@@ -7,6 +7,7 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -41,6 +42,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URI
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.School
 
 private const val LOGIN_POLLING_TIMEOUT_MILLIS = 10 * 60 * 1000L
 
@@ -88,6 +91,11 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
     }
 
     if (showWebView) {
+        // SSO途中の戻る操作はログインの入口へ戻す (WebViewの履歴を辿らせない)
+        BackHandler {
+            loginError = null
+            showWebView = false
+        }
         val error = loginError
         if (error != null) {
             Column(
@@ -128,9 +136,16 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
                 }
                 delay(1500)
             }
+            // 黙って終わらせず、タイムアウトしたことを知らせてやり直せるようにする
+            if (!tokenDelivered && loginError == null &&
+                SystemClock.elapsedRealtime() - startedAt >= LOGIN_POLLING_TIMEOUT_MILLIS
+            ) {
+                loginError = "ログインが時間内に完了しませんでした。もう一度お試しください。"
+            }
         }
         AndroidView(
             modifier = Modifier.fillMaxSize(),
+            onRelease = { releaseWebView(it) },
             factory = { context ->
                 WebView(context).apply {
                     settings.javaScriptEnabled = true
@@ -235,14 +250,23 @@ fun LoginScreen(onToken: (SsoLogin.Tokens) -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Moodle+R Companion", style = MaterialTheme.typography.headlineMedium)
+        LeadingIconBox(
+            Icons.Filled.School,
+            contentDescription = null,
+            size = 72.dp,
+            tint = MaterialTheme.colorScheme.onPrimary,
+            containerColor = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.height(20.dp))
+        Text("Moodle+R Companion", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
         Spacer(Modifier.height(8.dp))
         Text(
             "時間割・課題締切・シラバス・ポータルをひとつのアプリで",
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(36.dp))
         Button(
             onClick = {
                 if (probing) return@Button

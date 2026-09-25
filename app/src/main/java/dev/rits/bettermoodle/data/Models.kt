@@ -72,6 +72,39 @@ data class EventAction(
     val actionable: Boolean = false,
 )
 
+/** 取得済みイベントと続きの有無 */
+data class ActionEventPage(
+    val events: List<ActionEvent>,
+    /** true なら未取得の続きがある (取得上限で打ち切り) */
+    val hasMore: Boolean,
+    /** 続きを取得するときの aftereventid */
+    val nextAfterEventId: Long?,
+    /**
+     * 満杯ページなのにカーソルが進まない・循環するなど、終端と断定できない理由。
+     * null なら End (hasMore=false) または More (hasMore=true) として扱ってよい。
+     */
+    val incompleteReason: String? = null,
+) {
+    val isIncomplete: Boolean get() = incompleteReason != null
+}
+
+/** Worker用: 期間内の締切と、取り切れたかどうか */
+data class DeadlineWindow(
+    val events: List<ActionEvent>,
+    val complete: Boolean,
+    /** 取り切れなかった理由 (ページ上限・カーソル異常など)。complete=true なら null */
+    val incompleteReason: String? = null,
+    /** ページ上限で打ち切った場合の継続位置 (aftereventid)。カーソル異常や完了時は null */
+    val nextAfterEventId: Long? = null,
+)
+
+data class NotificationsPage(
+    val notifications: List<PopupNotification>,
+    val unreadCount: Int,
+    val hasMore: Boolean,
+    val nextOffset: Int,
+)
+
 @Serializable
 data class NotificationsResponse(
     val notifications: List<PopupNotification> = emptyList(),
@@ -215,4 +248,6 @@ class MoodleWsException(val errorCode: String?, message: String) : Exception(mes
 
 class MoodleHttpException(val status: Int) : Exception("HTTP $status")
 
-class MoodleResponseParseException : Exception("Moodle response parse error")
+/** 応答の形式が契約と異なる (不正JSON・想定外の構造・不正warning)。成功・0件・通信失敗と区別する。 */
+class MoodleResponseParseException(detail: String? = null) :
+    Exception(if (detail.isNullOrBlank()) "Moodle response parse error" else "Moodle response parse error: $detail")

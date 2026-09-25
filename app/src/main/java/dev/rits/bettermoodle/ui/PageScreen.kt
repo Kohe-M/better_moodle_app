@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -142,10 +143,17 @@ fun PageScreen(
                     }
                 },
                 actions = {
+                    // pluginfile以外の画像・iframe等はネイティブで再現できないため常時 Moodle へ抜けられるようにする
+                    if (!target.url.isNullOrBlank()) {
+                        IconButton(onClick = onFallbackWeb) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Moodleで開く")
+                        }
+                    }
                     IconButton(onClick = { refreshTick++ }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "再読み込み")
                     }
                 },
+                colors = appTopBarColors(),
             )
         },
     ) { padding ->

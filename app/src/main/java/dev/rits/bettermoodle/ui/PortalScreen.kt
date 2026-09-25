@@ -2,11 +2,17 @@ package dev.rits.bettermoodle.ui
 
 import android.annotation.SuppressLint
 import android.webkit.CookieManager
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -27,7 +33,10 @@ import dev.rits.bettermoodle.data.UrlPolicy
 fun PortalScreen(clearSessionTick: Int = 0) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(true) }
+    var mainFrameError by remember { mutableStateOf<MainFrameError?>(null) }
     var observedClearSessionTick by remember { mutableIntStateOf(clearSessionTick) }
+    val context = LocalContext.current
 
     BackHandler(enabled = canGoBack) {
         webView?.goBack()
@@ -41,8 +50,13 @@ fun PortalScreen(clearSessionTick: Int = 0) {
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     AndroidView(
         modifier = Modifier.fillMaxSize(),
+        onRelease = { view ->
+            if (webView === view) webView = null
+            releaseWebView(view)
+        },
         factory = { context ->
             WebView(context).apply {
                 settings.javaScriptEnabled = true
@@ -64,9 +78,37 @@ fun PortalScreen(clearSessionTick: Int = 0) {
                         return true
                     }
 
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                        loading = true
+                        mainFrameError = null
+                    }
+
                     override fun onPageFinished(view: WebView?, url: String?) {
+                        loading = false
                         canGoBack = view?.canGoBack() == true
                         CookieManager.getInstance().flush()
+                    }
+
+                    override fun onReceivedError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        error: WebResourceError?,
+                    ) {
+                        mainFrameErrorMessage(request, error)?.let {
+                            loading = false
+                            mainFrameError = it
+                        }
+                    }
+
+                    override fun onReceivedHttpError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        errorResponse: WebResourceResponse?,
+                    ) {
+                        mainFrameHttpErrorMessage(request, errorResponse)?.let {
+                            loading = false
+                            mainFrameError = it
+                        }
                     }
                 }
                 loadUrl(PORTAL_URL)
@@ -74,6 +116,19 @@ fun PortalScreen(clearSessionTick: Int = 0) {
             }
         },
     )
+    mainFrameError?.let { error ->
+        WebViewErrorPanel(
+            error = error,
+            onRetry = {
+                mainFrameError = null
+                loading = true
+                webView?.reload()
+            },
+            onOpenExternal = { openInCustomTab(context, error.url?.takeIf(UrlPolicy::canOpenExternally) ?: PORTAL_URL) },
+        )
+    }
+    if (loading) LinearProgressIndicator(Modifier.align(Alignment.TopCenter))
+    }
 }
 
 private const val PORTAL_URL = "https://sp.ritsumei.ac.jp/studentportal/s/"

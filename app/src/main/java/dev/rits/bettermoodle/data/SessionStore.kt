@@ -5,6 +5,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -27,7 +28,7 @@ private val Context.dataStore by preferencesDataStore(name = "session")
  * ログイントークンや軽量キャッシュの永続化。
  * (本格運用では EncryptedSharedPreferences 等への移行を検討)
  */
-class SessionStore(private val context: Context) {
+class SessionStore(private val context: Context) : AuthTokenStore, SyllabusUrlCache {
 
     private object Keys {
         val TOKEN = stringPreferencesKey("ws_token")
@@ -37,12 +38,15 @@ class SessionStore(private val context: Context) {
         val FULL_NAME = stringPreferencesKey("full_name")
         val SYLLABUS_CACHE = stringPreferencesKey("syllabus_url_cache") // JSON {code: url}
         val NOTIFIED_EVENT_IDS = stringSetPreferencesKey("notified_event_ids")
+        val CONSUMED_DEEP_LINK = stringPreferencesKey("consumed_deep_link")
+        val DEADLINE_CURSOR_FROM = longPreferencesKey("deadline_cursor_from")
+        val DEADLINE_CURSOR_AFTER = longPreferencesKey("deadline_cursor_after")
     }
 
     private val migrationMutex = Mutex()
     @Volatile private var migrationAttempted = false
 
-    val tokenFlow: Flow<String?> = flow {
+    override val tokenFlow: Flow<String?> = flow {
         migrateLegacyAuthIfNeeded()
         emitAll(context.dataStore.data.map { prefs ->
             decryptToken(prefs[Keys.ENCRYPTED_TOKEN])
@@ -50,7 +54,7 @@ class SessionStore(private val context: Context) {
     }
     val fullNameFlow: Flow<String?> = context.dataStore.data.map { it[Keys.FULL_NAME] }
 
-    suspend fun token(): String? {
+    override suspend fun token(): String? {
         migrateLegacyAuthIfNeeded()
         return decryptToken(context.dataStore.data.first()[Keys.ENCRYPTED_TOKEN])
     }
@@ -60,7 +64,7 @@ class SessionStore(private val context: Context) {
         return decryptToken(context.dataStore.data.first()[Keys.ENCRYPTED_PRIVATE_TOKEN])
     }
 
-    suspend fun saveLogin(token: String, privateToken: String?) {
+    override suspend fun saveLogin(token: String, privateToken: String?) {
         val encrypted = encryptToken(token)
         val encryptedPrivateToken = privateToken
             ?.takeIf { it.isNotBlank() }
@@ -81,16 +85,21 @@ class SessionStore(private val context: Context) {
         context.dataStore.edit { it[Keys.FULL_NAME] = name }
     }
 
-    suspend fun logout() {
+    override suspend fun logout() {
         context.dataStore.edit { it.clear() }
     }
 
-    suspend fun clearAuthTokens() {
+    override suspend fun clearAuthTokens() {
         context.dataStore.edit { prefs ->
             prefs.remove(Keys.ENCRYPTED_TOKEN)
             prefs.remove(Keys.ENCRYPTED_PRIVATE_TOKEN)
             prefs.remove(Keys.TOKEN)
             prefs.remove(Keys.PRIVATE_TOKEN)
+            // 通知済み集合・取得カーソル・通知宛先はアカウント (セッション) に紐づくので一緒に消す
+            prefs.remove(Keys.NOTIFIED_EVENT_IDS)
+            prefs.remove(Keys.DEADLINE_CURSOR_FROM)
+            prefs.remove(Keys.DEADLINE_CURSOR_AFTER)
+            prefs.remove(Keys.CONSUMED_DEEP_LINK)
         }
     }
 
@@ -152,23 +161,57 @@ class SessionStore(private val context: Context) {
         return keyGenerator.generateKey()
     }
 
-    suspend fun syllabusCache(): Map<String, String> {
+    override suspend fun syllabusCache(): Map<String, String> {
         val raw = context.dataStore.data.first()[Keys.SYLLABUS_CACHE] ?: return emptyMap()
         return runCatching {
             kotlinx.serialization.json.Json.decodeFromString<Map<String, String>>(raw)
         }.getOrDefault(emptyMap())
     }
 
-    suspend fun saveSyllabusUrl(code: String, year: Int, url: String) {
-        val updated = syllabusCache() + (syllabusCacheKey(code, year) to url)
-        context.dataStore.edit {
-            it[Keys.SYLLABUS_CACHE] = kotlinx.serialization.json.Json.encodeToString(
+    override suspend fun saveSyllabusUrl(code: String, year: Int, url: String) {
+        // read-modify-write を edit 内で行い、同時解決で他コードの更新を失わないようにする
+        context.dataStore.edit { prefs ->
+            val current = prefs[Keys.SYLLABUS_CACHE]?.let { raw ->
+                runCatching {
+                    kotlinx.serialization.json.Json.decodeFromString<Map<String, String>>(raw)
+                }.getOrDefault(emptyMap())
+            }.orEmpty()
+            val updated = current + (syllabusCacheKey(code, year) to url)
+            prefs[Keys.SYLLABUS_CACHE] = kotlinx.serialization.json.Json.encodeToString(
                 kotlinx.serialization.serializer<Map<String, String>>(), updated,
             )
         }
     }
 
-    fun syllabusCacheKey(code: String, year: Int): String = "$year:$code"
+    override fun syllabusCacheKey(code: String, year: Int): String = "$year:$code"
+
+    /** 消費済みの通知宛先キー (プロセス再生成後に同じ Intent を二重に処理しないため) */
+    suspend fun consumedDeepLinkKey(): String? =
+        context.dataStore.data.first()[Keys.CONSUMED_DEEP_LINK]
+
+    suspend fun markDeepLinkConsumed(key: String) {
+        context.dataStore.edit { it[Keys.CONSUMED_DEEP_LINK] = key }
+    }
+
+    /** Worker が取得上限で打ち切ったときの継続位置 */
+    suspend fun deadlineCursor(): dev.rits.bettermoodle.work.DeadlineCursor? {
+        val prefs = context.dataStore.data.first()
+        val from = prefs[Keys.DEADLINE_CURSOR_FROM] ?: return null
+        val after = prefs[Keys.DEADLINE_CURSOR_AFTER] ?: return null
+        return dev.rits.bettermoodle.work.DeadlineCursor(from, after)
+    }
+
+    suspend fun saveDeadlineCursor(cursor: dev.rits.bettermoodle.work.DeadlineCursor?) {
+        context.dataStore.edit { prefs ->
+            if (cursor == null) {
+                prefs.remove(Keys.DEADLINE_CURSOR_FROM)
+                prefs.remove(Keys.DEADLINE_CURSOR_AFTER)
+            } else {
+                prefs[Keys.DEADLINE_CURSOR_FROM] = cursor.fromEpochSec
+                prefs[Keys.DEADLINE_CURSOR_AFTER] = cursor.afterEventId
+            }
+        }
+    }
 
     suspend fun notifiedEventIds(): Set<String> =
         context.dataStore.data.first()[Keys.NOTIFIED_EVENT_IDS] ?: emptySet()

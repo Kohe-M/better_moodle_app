@@ -1,6 +1,7 @@
 package dev.rits.bettermoodle.auth
 
 import dev.rits.bettermoodle.data.MoodleClient
+import dev.rits.bettermoodle.data.useResponse
 import java.net.URLDecoder
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -54,12 +55,13 @@ object SsoLogin {
      * 受け取り経路として使う。セッションCookieが無い/期限切れの場合は Location が
      * ログインページになるので null を返す (呼び出し側でWebViewのSSOにフォールバック)。
      */
-    fun fetchTokenByProbe(passport: String, cookieHeader: String?): Tokens? = runCatching {
+    suspend fun fetchTokenByProbe(passport: String, cookieHeader: String?): Tokens? = try {
         val request = okhttp3.Request.Builder()
             .url(launchUrl(passport))
             .apply { if (!cookieHeader.isNullOrBlank()) header("Cookie", cookieHeader) }
             .build()
-        probeHttp.newCall(request).execute().use { resp ->
+        // 画面離脱 (ログイン取消) でプローブも中断できるようキャンセル対応で実行する
+        probeHttp.newCall(request).useResponse { resp ->
             val location = resp.header("Location")
             val tokens = tokensFromLocationHeader(location, passport)
             if (dev.rits.bettermoodle.BuildConfig.DEBUG) {
@@ -81,7 +83,11 @@ object SsoLogin {
             }
             tokens
         }
-    }.getOrNull()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
 
     /** リダイレクト先ヘッダがトークンスキームURLならトークンを取り出す */
     fun tokensFromLocationHeader(location: String?, passport: String): Tokens? {

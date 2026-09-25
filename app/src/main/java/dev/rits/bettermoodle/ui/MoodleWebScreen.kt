@@ -3,7 +3,9 @@ package dev.rits.bettermoodle.ui
 import android.annotation.SuppressLint
 import android.util.Log
 import android.webkit.CookieManager
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
@@ -57,6 +59,7 @@ fun MoodleWebScreen(
     var webView by remember { mutableStateOf<WebView?>(null) }
     var loading by remember(url) { mutableStateOf(true) }
     var blockedNotice by remember(url) { mutableStateOf<BlockedNotice?>(null) }
+    var mainFrameError by remember(url) { mutableStateOf<MainFrameError?>(null) }
     var initialUrl by remember(url) { mutableStateOf<String?>(null) }
     val canLoadOriginalUrl = UrlPolicy.isAllowedMoodleWebViewUrl(url)
 
@@ -86,6 +89,7 @@ fun MoodleWebScreen(
                         Icon(Icons.Filled.Close, contentDescription = "閉じる")
                     }
                 },
+                colors = appTopBarColors(),
             )
         },
     ) { padding ->
@@ -108,6 +112,11 @@ fun MoodleWebScreen(
                 initialUrl?.let { urlToLoad ->
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
+                        // 画面を離れたら読み込みを止めて破棄する (Cookieは CookieManager 側に残る)
+                        onRelease = { view ->
+                            if (webView === view) webView = null
+                            releaseWebView(view)
+                        },
                         factory = { context ->
                             WebView(context).apply {
                                 settings.javaScriptEnabled = true
@@ -133,9 +142,40 @@ fun MoodleWebScreen(
                                         return true
                                     }
 
+                                    override fun onPageStarted(
+                                        view: WebView?,
+                                        url: String?,
+                                        favicon: android.graphics.Bitmap?,
+                                    ) {
+                                        loading = true
+                                        mainFrameError = null
+                                    }
+
                                     override fun onPageFinished(view: WebView?, url: String?) {
                                         loading = false
                                         CookieManager.getInstance().flush()
+                                    }
+
+                                    override fun onReceivedError(
+                                        view: WebView?,
+                                        request: WebResourceRequest?,
+                                        error: WebResourceError?,
+                                    ) {
+                                        mainFrameErrorMessage(request, error)?.let {
+                                            loading = false
+                                            mainFrameError = it
+                                        }
+                                    }
+
+                                    override fun onReceivedHttpError(
+                                        view: WebView?,
+                                        request: WebResourceRequest?,
+                                        errorResponse: WebResourceResponse?,
+                                    ) {
+                                        mainFrameHttpErrorMessage(request, errorResponse)?.let {
+                                            loading = false
+                                            mainFrameError = it
+                                        }
                                     }
                                 }
                                 setDownloadListener { _, _, _, _, _ ->
@@ -145,6 +185,17 @@ fun MoodleWebScreen(
                                 webView = this
                             }
                         },
+                    )
+                }
+                mainFrameError?.let { error ->
+                    WebViewErrorPanel(
+                        error = error,
+                        onRetry = {
+                            mainFrameError = null
+                            loading = true
+                            webView?.reload() ?: run { initialUrl = null; initialUrl = url }
+                        },
+                        onOpenExternal = null,
                     )
                 }
                 if (loading) LinearProgressIndicator(Modifier.align(Alignment.TopCenter))

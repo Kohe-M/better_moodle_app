@@ -1,7 +1,7 @@
 package dev.rits.bettermoodle.ui
 
 import android.widget.Toast
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.Assignment
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
@@ -37,7 +38,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -47,9 +47,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
@@ -61,6 +62,8 @@ import dev.rits.bettermoodle.data.ModuleGroup
 import dev.rits.bettermoodle.data.PageTarget
 import dev.rits.bettermoodle.data.PreviewKind
 import dev.rits.bettermoodle.data.QuizTarget
+import dev.rits.bettermoodle.data.SyllabusRepository
+import dev.rits.bettermoodle.data.SyllabusResolveResult
 import dev.rits.bettermoodle.data.UrlPolicy
 import dev.rits.bettermoodle.data.groupSectionModules
 import dev.rits.bettermoodle.data.previewKindFor
@@ -203,18 +206,21 @@ fun CourseScreen(
                     if (courseCode != null) {
                         IconButton(onClick = {
                             scope.launch {
-                                val syllabus = container.syllabusRepository.resolveUrl(courseCode)
-                                if (syllabus != null) openInCustomTab(context, syllabus)
+                                when (val result = container.syllabusRepository.resolve(courseCode)) {
+                                    is SyllabusResolveResult.Found -> openInCustomTab(context, result.url)
+                                    else -> {
+                                        // 失敗理由を知らせ、検索サイトで探せるようにする
+                                        Toast.makeText(context, result.failureMessage, Toast.LENGTH_LONG).show()
+                                        openInCustomTab(context, SyllabusRepository.SYLLABUS_SEARCH_URL)
+                                    }
+                                }
                             }
                         }) {
                             Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "シラバス")
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                ),
+                colors = appTopBarColors(),
             )
         },
     ) { padding ->
@@ -230,14 +236,18 @@ fun CourseScreen(
                 is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
                 is UiState.Success -> LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                    contentPadding = ListContentPadding,
                 ) {
+                    if (s.isStale) item(key = "stale") { StaleDataBanner(s, onRetry = refresh) }
                     // セクション = 見出し + 連結カードスタック (概要・ラベル・アクティビティ)。
                     // スタック内は2dpの隙間と小さい角丸で「ひとまとまり」に見せる。
+                    var firstSection = true
                     s.data.filter { it.uservisible }.forEach { section ->
-                        val hasSummary = htmlToPlainText(section.summary).isNotBlank()
+                        val hasSummary = htmlHasRenderableContent(section.summary)
                         if (section.modules.isEmpty() && !hasSummary) return@forEach
-                        item(key = "sec-${section.id}") { SectionHeader(section) }
+                        val isFirst = firstSection
+                        firstSection = false
+                        item(key = "sec-${section.id}") { SectionHeader(section, isFirst) }
                         val groups = groupSectionModules(section.modules.filter { it.uservisible })
                         val stackSize = groups.size + if (hasSummary) 1 else 0
                         if (hasSummary) {
@@ -328,30 +338,27 @@ private fun FolderFilesSheet(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item(key = "title") {
-                Text(module.name, style = MaterialTheme.typography.titleMedium)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(module.name, style = MaterialTheme.typography.titleLarge)
+                    MetaText("${module.downloadableFiles.size}件のファイル")
+                }
             }
             module.downloadableFiles.forEach { content ->
                 item(key = content.fileurl ?: "${content.filename}-${content.filepath}") {
-                    Surface(
+                    AppCard(
                         onClick = { onOpenFile(content) },
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.fillMaxWidth(),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(Icons.Filled.Description, contentDescription = null)
+                            LeadingIconBox(Icons.Filled.Description, contentDescription = null, size = 36.dp)
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 val filename = content.filename ?: "ファイル"
-                                Text(filename, style = MaterialTheme.typography.bodyLarge, maxLines = 2)
-                                Text(
-                                    folderFileLabel(filename, content.mimetype),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                Text(filename, style = MaterialTheme.typography.titleSmall, maxLines = 2)
+                                MetaText(folderFileLabel(filename, content.mimetype))
                             }
                         }
                     }
@@ -371,13 +378,10 @@ private fun folderFileLabel(filename: String, mimeType: String?): String =
     }
 
 @Composable
-private fun SectionHeader(section: CourseSection) {
-    Text(
+private fun SectionHeader(section: CourseSection, isFirst: Boolean) {
+    SectionHeading(
         text = section.name.ifBlank { "セクション ${section.section}" },
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 16.dp, bottom = 6.dp),
+        modifier = Modifier.padding(top = if (isFirst) 4.dp else 24.dp, bottom = 8.dp),
     )
 }
 
@@ -425,7 +429,8 @@ private fun SectionSummary(
 ) {
     Surface(
         shape = position.shape(),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = stackBorder(),
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = position.itemSpacing()),
@@ -433,9 +438,9 @@ private fun SectionSummary(
         HtmlText(
             html = section.summary,
             onOpenUrl = { onOpenUrl(it, section.name.ifBlank { "Moodle" }) },
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(14.dp),
         )
     }
 }
@@ -454,11 +459,12 @@ private fun ModuleGroupItem(
     if (module == null) {
         Surface(
             shape = position.shape(),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = stackBorder(),
             modifier = stackModifier,
         ) {
             Column(
-                modifier = Modifier.padding(12.dp),
+                modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 group.labels.forEach { LabelText(it, onOpenUrl, modifier = Modifier) }
@@ -482,11 +488,12 @@ private fun ModuleGroupItem(
             )
             Surface(
                 shape = position.bottomShape(),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                border = stackBorder(),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     group.labels.forEach { LabelText(it, onOpenUrl, modifier = Modifier) }
@@ -511,6 +518,10 @@ private fun LabelText(
     )
 }
 
+/** スタック内カードの細い枠線。背景との境界を確実に見せる。 */
+@Composable
+private fun stackBorder() = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+
 @Composable
 fun ModuleRow(
     module: CourseModule,
@@ -519,61 +530,72 @@ fun ModuleRow(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    val (icon, tint) = moduleIcon(module)
     Surface(
         onClick = onClick,
         shape = shape,
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = stackBorder(),
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier.size(36.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = moduleIcon(module),
-                    contentDescription = module.modPlural,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
+            LeadingIconBox(
+                icon = icon,
+                contentDescription = module.modPlural,
+                tint = tint,
+                containerColor = tint.copy(alpha = 0.13f),
+            )
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(module.name, style = MaterialTheme.typography.bodyLarge, maxLines = 2)
+                // Moodle はモジュール名を HTML エスケープして返す ("Q&amp;A")
+                Text(
+                    htmlToPlainText(module.name).ifBlank { module.name },
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 val sub = buildString {
                     append(module.modPlural.ifBlank { module.modName })
                     module.pdfContent?.let { append(" · PDFプレビュー可") }
                     module.availabilityinfo?.let { append(" · 制限あり") }
                 }
-                Text(
-                    sub,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (htmlToPlainText(module.description).isNotBlank()) {
+                MetaText(sub, modifier = Modifier.padding(top = 2.dp))
+                if (htmlHasRenderableContent(module.description)) {
                     HtmlText(
                         html = module.description,
                         onOpenUrl = { onOpenUrl(it, module.name.ifBlank { "Moodle" }) },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp),
+                        modifier = Modifier.padding(top = 6.dp),
                     )
                 }
             }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(start = 4.dp),
+            )
         }
     }
 }
 
-private fun moduleIcon(module: CourseModule): ImageVector = when (module.modName) {
-    "assign" -> Icons.AutoMirrored.Filled.Assignment
-    "quiz" -> Icons.Filled.Quiz
-    "resource" -> if (module.pdfContent != null) Icons.Filled.PictureAsPdf else Icons.AutoMirrored.Filled.Article
-    "folder" -> Icons.Filled.Folder
-    "url" -> Icons.Filled.Link
-    "forum" -> Icons.Filled.Forum
-    "page" -> Icons.AutoMirrored.Filled.Article
-    "lti", "url_video" -> Icons.Filled.Videocam
-    else -> Icons.AutoMirrored.Filled.Article
+/** 種別ごとのアイコンと色。課題・小テストは目立たせ、資料系は落ち着いた色にする。 */
+@Composable
+private fun moduleIcon(module: CourseModule): Pair<ImageVector, Color> {
+    val c = MaterialTheme.colorScheme
+    return when (module.modName) {
+        "assign" -> Icons.AutoMirrored.Filled.Assignment to c.error
+        "quiz" -> Icons.Filled.Quiz to c.tertiary
+        "resource" -> if (module.pdfContent != null) Icons.Filled.PictureAsPdf to c.error else Icons.AutoMirrored.Filled.Article to c.primary
+        "folder" -> Icons.Filled.Folder to c.tertiary
+        "url" -> Icons.Filled.Link to c.secondary
+        "forum" -> Icons.Filled.Forum to c.secondary
+        "page" -> Icons.AutoMirrored.Filled.Article to c.primary
+        "lti", "url_video" -> Icons.Filled.Videocam to c.secondary
+        else -> Icons.AutoMirrored.Filled.Article to c.primary
+    }
 }

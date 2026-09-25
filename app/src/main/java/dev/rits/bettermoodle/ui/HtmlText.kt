@@ -27,8 +27,19 @@ private val MoodleHtmlSafelist: Safelist = Safelist.basic()
     .addTags("div", "img")
     .addAttributes("img", "alt", "src")
 
+/**
+ * 表示可否の判定や一行プレビュー用のプレーンテキスト。[HtmlText] と同じ描画契約
+ * ([htmlToAnnotatedString]) を通すので、画像だけの HTML も "[画像]" として空にならない (V03)。
+ * 改行は空白に畳む。
+ */
 fun htmlToPlainText(html: String?): String =
-    Jsoup.parse(Jsoup.clean(html.orEmpty(), MoodleHtmlSafelist)).text().trim()
+    htmlToAnnotatedString(html, onOpenUrl = null).text
+        .replace(Regex("\\s*\\n\\s*"), " ")
+        .trim()
+
+/** [HtmlText] が何かを描画するか。画面の表示分岐は必ずこれ (または [htmlToPlainText]) で判定する。 */
+fun htmlHasRenderableContent(html: String?): Boolean =
+    htmlToAnnotatedString(html, onOpenUrl = null).text.isNotBlank()
 
 fun htmlToAnnotatedString(html: String?): AnnotatedString =
     htmlToAnnotatedString(html, onOpenUrl = null)
@@ -103,7 +114,29 @@ private fun AnnotatedString.Builder.appendElement(
 ) {
     when (element.normalName()) {
         "br" -> appendLineBreak(tracker)
-        "img" -> appendTextToken("[画像]", tracker)
+        // 画像はインライン描画しない。src があればリンクにして、タップで原画像 (pluginfile等) を開けるようにする
+        "img" -> {
+            val src = element.attr("src").trim()
+            val alt = element.attr("alt").trim()
+            val label = if (alt.isNotBlank()) "[画像: $alt]" else "[画像]"
+            if (src.isBlank() || linkInteractionListener == null) {
+                appendTextToken(label, tracker)
+            } else {
+                appendSpacingIfNeeded(label, tracker)
+                withLink(
+                    LinkAnnotation.Url(
+                        url = src,
+                        styles = TextLinkStyles(
+                            style = SpanStyle(
+                                color = Color(0xFF0B57D0),
+                                textDecoration = TextDecoration.Underline,
+                            ),
+                        ),
+                        linkInteractionListener = linkInteractionListener,
+                    ),
+                ) { appendTracked(label, tracker) }
+            }
+        }
         "li" -> {
             appendLineBreakIfNeeded(tracker)
             appendTracked("・", tracker)
@@ -172,18 +205,22 @@ private fun AnnotatedString.Builder.appendNormalizedText(text: String, tracker: 
 }
 
 private fun AnnotatedString.Builder.appendTextToken(text: String, tracker: AppendTracker) {
+    appendSpacingIfNeeded(text, tracker)
+    appendTracked(text, tracker)
+}
+
+private fun AnnotatedString.Builder.appendSpacingIfNeeded(next: String, tracker: AppendTracker) {
     if (length > 0) {
         val previous = checkNotNull(tracker.lastChar)
         if (
             previous != '\n' &&
             !previous.isWhitespace() &&
             previous != '・' &&
-            text.firstOrNull()?.isSpacingPunctuation() == false
+            next.firstOrNull()?.isSpacingPunctuation() == false
         ) {
             appendTracked(' ', tracker)
         }
     }
-    appendTracked(text, tracker)
 }
 
 private fun AnnotatedString.Builder.appendLineBreakIfNeeded(tracker: AppendTracker) {

@@ -8,11 +8,17 @@ class MoodleRepository(
 ) {
     suspend fun siteInfo(): SiteInfo = client.callAs("core_webservice_get_site_info")
 
-    suspend fun enrolledCourses(): List<Course> {
+    /**
+     * 履修コース一覧。[classification] は Moodle の timeline classification
+     * ("inprogress" / "past" / "future" / "all")。UIでは既定を「進行中」とし、
+     * 過去・未来のコースも切り替えて見られるようにする。
+     */
+    suspend fun enrolledCourses(classification: String = "inprogress"): List<Course> {
+        require(classification in COURSE_CLASSIFICATIONS) { "Unknown classification" }
         val resp: CoursesByTimelineResponse = client.callAs(
             "core_course_get_enrolled_courses_by_timeline_classification",
             mapOf(
-                "classification" to "inprogress",
+                "classification" to classification,
                 "limit" to "0",
                 "offset" to "0",
             ),
@@ -20,40 +26,128 @@ class MoodleRepository(
         return resp.courses
     }
 
-    /** 今後の締切イベント (課題・小テスト等)。公式アプリのタイムラインと同じAPI。 */
-    suspend fun upcomingEvents(fromEpochSec: Long, limit: Int = 50): List<ActionEvent> {
+    /**
+     * 今後のイベント (課題・小テスト等) を1ページ以上取得する。公式アプリのタイムラインと同じAPI。
+     * [maxPages] ページ取得しても続きがある場合は [ActionEventPage.hasMore] で知らせ、
+     * 打ち切りを「全件」と誤認させない。
+     */
+    suspend fun upcomingEvents(
+        fromEpochSec: Long,
+        limit: Int = 50,
+        afterEventId: Long? = null,
+        maxPages: Int = DEFAULT_ACTION_EVENT_PAGES,
+    ): ActionEventPage {
         val events = mutableListOf<ActionEvent>()
-        var afterEventId: Long? = null
+        val seenIds = mutableSetOf<Long>()
+        var cursor = afterEventId
         var pagesFetched = 0
-        var received: Int
+        var hasMore: Boolean
+        var incompleteReason: String? = null
 
         do {
             val resp: ActionEventsResponse = client.callAs(
                 "core_calendar_get_action_events_by_timesort",
-                actionEventsParams(fromEpochSec, limit, afterEventId),
+                actionEventsParams(fromEpochSec, limit, cursor),
             )
-            received = resp.events.size
-            events += resp.events
+            val fresh = resp.events.filter { seenIds.add(it.id) }
+            events += fresh
             pagesFetched += 1
-            afterEventId = resp.lastid
-        } while (shouldFetchNextPage(limit, received, pagesFetched))
+            val pageFull = resp.events.size >= limit && limit > 0
+            // lastid が進まない応答で同一ページを取り続けない。ただし満杯ページでカーソルが
+            // 進まない・既知IDしか返らないのは終端ではなくプロトコル異常なので、End と区別する
+            val cursorAdvanced = resp.lastid > 0L && resp.lastid != cursor
+            val cycled = resp.events.isNotEmpty() && fresh.isEmpty()
+            when {
+                pageFull && !cursorAdvanced -> {
+                    incompleteReason = "サーバーの応答でページ位置 (lastid) が進みませんでした"
+                    hasMore = false
+                }
+                cycled -> {
+                    incompleteReason = "同じイベントが繰り返し返されました"
+                    hasMore = false
+                }
+                else -> hasMore = pageFull
+            }
+            if (cursorAdvanced) cursor = resp.lastid
+        } while (hasMore && pagesFetched < maxPages)
 
-        // lastidが欠けた応答で同一ページを再取得しても、下流のLazyColumnのキー重複を起こさない
-        return events.distinctBy { it.id }
+        return ActionEventPage(
+            events = events,
+            hasMore = hasMore,
+            nextAfterEventId = cursor.takeIf { hasMore },
+            incompleteReason = incompleteReason,
+        )
     }
 
-    /** 課題・小テストの締切だけに絞ったイベント */
-    suspend fun upcomingDeadlines(fromEpochSec: Long): List<ActionEvent> =
-        upcomingEvents(fromEpochSec).filter { it.modulename in DEADLINE_MODULES }
+    /** 課題・小テストの締切だけに絞ったイベント (ページ情報付き) */
+    suspend fun upcomingDeadlines(
+        fromEpochSec: Long,
+        afterEventId: Long? = null,
+        maxPages: Int = DEFAULT_ACTION_EVENT_PAGES,
+    ): ActionEventPage {
+        val page = upcomingEvents(fromEpochSec, afterEventId = afterEventId, maxPages = maxPages)
+        return page.copy(events = page.events.filter { it.modulename in DEADLINE_MODULES })
+    }
 
-    suspend fun notifications(limit: Int = 50): NotificationsResponse = client.callAs(
-        "message_popup_get_popup_notifications",
-        mapOf(
-            "useridto" to "0",
-            "limit" to limit.toString(),
-            "offset" to "0",
-        ),
-    )
+    /**
+     * [fromEpochSec]..[untilEpochSec] の締切を取得する (Worker用)。
+     * timesort 昇順で返る前提で、範囲を超えたイベントが出るか続きが無くなるまで取得する。
+     * ページ上限 [maxPages] やカーソル異常で終端を確認できなかった場合は
+     * [DeadlineWindow.complete] を false にし理由を添える。「取り切った」と断定するのは complete=true のときだけ。
+     */
+    suspend fun deadlinesWithin(
+        fromEpochSec: Long,
+        untilEpochSec: Long,
+        maxPages: Int = WORKER_ACTION_EVENT_MAX_PAGES,
+        /** 前回ページ上限で打ち切った位置から続ける場合の aftereventid */
+        afterEventId: Long? = null,
+    ): DeadlineWindow {
+        val collected = mutableListOf<ActionEvent>()
+        var cursor: Long? = afterEventId
+        var pages = 0
+        fun window(complete: Boolean, reason: String?, next: Long? = null) = DeadlineWindow(
+            events = collected.distinctBy { it.id }
+                .filter { it.modulename in DEADLINE_MODULES && it.timesort <= untilEpochSec },
+            complete = complete,
+            incompleteReason = reason.takeIf { !complete },
+            nextAfterEventId = next.takeIf { !complete },
+        )
+        while (true) {
+            val page = upcomingEvents(fromEpochSec, afterEventId = cursor, maxPages = 1)
+            pages += 1
+            collected += page.events
+            val beyondWindow = page.events.any { it.timesort > untilEpochSec }
+            if (beyondWindow) return window(complete = true, reason = null)
+            if (page.isIncomplete) return window(complete = false, reason = page.incompleteReason)
+            if (!page.hasMore) return window(complete = true, reason = null)
+            if (pages >= maxPages) {
+                return window(
+                    complete = false,
+                    reason = "取得ページ数の上限 ($maxPages) に達しました",
+                    next = page.nextAfterEventId,
+                )
+            }
+            cursor = page.nextAfterEventId
+        }
+    }
+
+    /** 通知一覧。[offset] から [limit] 件。続きの有無は [NotificationsPage.hasMore]。 */
+    suspend fun notifications(limit: Int = 50, offset: Int = 0): NotificationsPage {
+        val resp: NotificationsResponse = client.callAs(
+            "message_popup_get_popup_notifications",
+            mapOf(
+                "useridto" to "0",
+                "limit" to limit.toString(),
+                "offset" to offset.toString(),
+            ),
+        )
+        return NotificationsPage(
+            notifications = resp.notifications,
+            unreadCount = resp.unreadcount,
+            hasMore = resp.notifications.size >= limit && limit > 0,
+            nextOffset = offset + resp.notifications.size,
+        )
+    }
 
     /** コースの中身 (セクション/アクティビティ一覧) */
     suspend fun courseContents(courseId: Long): List<CourseSection> =
@@ -131,47 +225,134 @@ class MoodleRepository(
     suspend fun page(courseId: Long, courseModuleId: Long): MoodlePage? =
         pages(courseId).firstOrNull { it.coursemodule == courseModuleId }
 
-    suspend fun startAssignmentSubmission(assignId: Long) {
-        client.call("mod_assign_start_submission", mapOf("assignid" to assignId.toString()))
+    /**
+     * 制限時間付き課題の提出開始 (計測開始)。通常課題では `timelimitnotenabled` warning が返るため、
+     * 呼び出し側は [Assignment.hasTimeLimit] の場合だけ使うこと。
+     * 引数名は取得系と同じ `assignid` (保存・最終提出の `assignmentid` とは異なる)。
+     */
+    suspend fun startAssignmentSubmission(assignId: Long): StartSubmissionResponse {
+        val element = client.call("mod_assign_start_submission", startSubmissionParams(assignId))
+        if (element !is kotlinx.serialization.json.JsonObject) {
+            throw MoodleResponseParseException("start_submission did not return an object")
+        }
+        val resp: StartSubmissionResponse = client.decodeStrict(element)
+        // warnings は配列でなければならない (省略は許容、文字列などの不正は形式エラー)
+        element["warnings"]?.let { client.decodeWarnings(it) }
+        if (resp.warnings.isNotEmpty()) throw AssignmentSubmissionRejectedException(resp.warnings)
+        return resp
     }
 
-    suspend fun saveOnlineTextSubmission(assignId: Long, htmlText: String) {
-        client.call(
+    /**
+     * オンラインテキストを保存する。[htmlText] は HTML (format=1) であること。
+     * warning が返った場合は保存されていない可能性があるため例外にする。
+     */
+    suspend fun saveOnlineTextSubmission(assignmentId: Long, htmlText: String) {
+        val warnings = client.callForWarningList(
             "mod_assign_save_submission",
-            mapOf(
-                "assignid" to assignId.toString(),
-                "plugindata[onlinetext_editor][text]" to htmlText,
-                "plugindata[onlinetext_editor][format]" to "1",
-                "plugindata[onlinetext_editor][itemid]" to "0",
-            ),
+            saveOnlineTextParams(assignmentId, htmlText),
         )
+        if (warnings.isNotEmpty()) throw AssignmentSubmissionRejectedException(warnings)
     }
 
-    suspend fun saveFileSubmission(assignId: Long, itemId: Long) {
-        client.call(
+    /**
+     * ファイル提出領域を draft [draftItemId] の内容で置き換える。
+     * Moodle は draft に無い既存ファイルを削除するため、[draftItemId] には
+     * 残したい既存ファイルも含めておく必要がある ([AssignmentFileDraft] を使う)。
+     */
+    suspend fun saveFileSubmission(assignmentId: Long, draftItemId: Long) {
+        val warnings = client.callForWarningList(
             "mod_assign_save_submission",
-            mapOf(
-                "assignid" to assignId.toString(),
-                "plugindata[files_filemanager]" to itemId.toString(),
-            ),
+            saveFileSubmissionParams(assignmentId, draftItemId),
         )
+        if (warnings.isNotEmpty()) throw AssignmentSubmissionRejectedException(warnings)
     }
 
-    suspend fun submitAssignmentForGrading(assignId: Long, acceptSubmissionStatement: Boolean) {
-        client.call(
+    suspend fun submitAssignmentForGrading(assignmentId: Long, acceptSubmissionStatement: Boolean) {
+        val warnings = client.callForWarningList(
             "mod_assign_submit_for_grading",
-            mapOf(
-                "assignid" to assignId.toString(),
-                "acceptsubmissionstatement" to if (acceptSubmissionStatement) "1" else "0",
-            ),
+            submitForGradingParams(assignmentId, acceptSubmissionStatement),
         )
+        if (warnings.isNotEmpty()) throw AssignmentSubmissionRejectedException(warnings)
     }
 
-    suspend fun uploadSubmissionFile(file: java.io.File, filename: String): UploadedFile {
-        val uploaded = client.uploadFile(file, filename)
+    /** 空のdraft領域IDを取得する (既存ファイルを全削除する場合や、先にIDが必要な場合に使う) */
+    suspend fun unusedDraftItemId(): Long {
+        val resp: UnusedDraftItemIdResponse = client.callAs("core_files_get_unused_draft_itemid")
+        if (resp.itemid <= 0L) throw MoodleWsException("nodraft", "draft領域を作成できませんでした")
+        return resp.itemid
+    }
+
+    /**
+     * ファイルを draft 領域へアップロードする。[draftItemId] が null なら新規 draft を作る。
+     * [filepath] は draft 内ディレクトリ。応答の itemid / filename / filepath が要求と一致することを確認する。
+     */
+    suspend fun uploadSubmissionFile(
+        file: java.io.File,
+        filename: String,
+        draftItemId: Long? = null,
+        filepath: String = "/",
+    ): UploadedFile {
+        val uploaded = client.uploadFile(file, filename, draftItemId, filepath)
         val first = uploaded.firstOrNull() ?: throw MoodleWsException("uploadfailed", "Upload returned no file")
         if (first.itemid <= 0) throw MoodleWsException("uploadfailed", "Upload did not return a draft item ID")
+        if (draftItemId != null && first.itemid != draftItemId) {
+            throw MoodleWsException("uploadfailed", "Upload went to an unexpected draft area")
+        }
+        if (first.filename.isNotBlank() && first.filename != filename) {
+            throw MoodleWsException("uploadfailed", "Upload stored a different filename (${first.filename})")
+        }
+        val expectedPath = MoodleClient.normalizeDraftPath(filepath)
+        if (first.filepath.isNotBlank() && MoodleClient.normalizeDraftPath(first.filepath) != expectedPath) {
+            throw MoodleWsException("uploadfailed", "Upload stored a different path (${first.filepath})")
+        }
         return first
+    }
+
+    /**
+     * 提出済みファイルを一時ファイルへ取得する (draft引き継ぎ用)。
+     * サイズが分かっている場合は一致を確認し、HTML応答や途中切断を再アップロードしない。
+     */
+    suspend fun downloadSubmissionFile(file: MoodleFile, dest: java.io.File, maxBytes: Long) {
+        val url = file.fileurl ?: throw MoodleWsException("nofileurl", "ファイルURLがありません")
+        val expectedSize = file.filesize
+            ?: throw java.io.IOException("既存ファイル ${file.filename} のサイズが不明なため、取得内容を検証できません。Moodleで編集してください。")
+        // 提出物自体が HTML (mimetype / 拡張子) のときだけ text/html 応答を受け入れる。
+        // それ以外で HTML が返るのはログインページ等の可能性が高いので再アップロードしない
+        val downloaded = client.downloadToFile(url, dest, maxBytes, allowHtml = isHtmlSubmission(file))
+        if (downloaded.bytes != expectedSize) {
+            dest.delete()
+            throw java.io.IOException(
+                "既存ファイル ${file.filename} の取得サイズ (${downloaded.bytes}) が提出物の情報 ($expectedSize) と一致しません。",
+            )
+        }
+    }
+
+    private fun isHtmlSubmission(file: MoodleFile): Boolean {
+        val mime = file.mimetype?.substringBefore(';')?.trim()?.lowercase()
+        val name = file.filename.lowercase()
+        return mime == "text/html" || name.endsWith(".html") || name.endsWith(".htm")
+    }
+
+    /**
+     * 通知を既読にする。契約: 応答は `{notificationid, warnings}` で、要求した ID と一致し warnings が空なら成功。
+     * warnings があれば false、形式が違えば応答形式エラー。
+     */
+    suspend fun markNotificationRead(notificationId: Long, token: String? = null): Boolean {
+        require(notificationId > 0L) { "Invalid notification ID" }
+        val element = client.call(
+            "core_message_mark_notification_read",
+            mapOf("notificationid" to notificationId.toString()),
+            tokenOverride = token,
+        )
+        if (element !is kotlinx.serialization.json.JsonObject) {
+            throw MoodleResponseParseException("mark_notification_read did not return an object")
+        }
+        val resp: MarkNotificationReadResponse = client.decodeStrict(element)
+        element["warnings"]?.let { client.decodeWarnings(it) }
+        if (resp.notificationid != notificationId) {
+            throw MoodleResponseParseException("mark_notification_read returned a different id (${resp.notificationid})")
+        }
+        return resp.warnings.isEmpty()
     }
 
     suspend fun forumDiscussions(forumInstanceId: Long): List<ForumDiscussion> {
@@ -245,13 +426,19 @@ class MoodleRepository(
 
     companion object {
         val DEADLINE_MODULES = setOf("assign", "quiz", "workshop", "lesson")
-        private const val MAX_ACTION_EVENT_PAGES = 3
+        val COURSE_CLASSIFICATIONS = listOf("inprogress", "future", "past", "all")
+        const val DEFAULT_ACTION_EVENT_PAGES = 3
+        const val WORKER_ACTION_EVENT_MAX_PAGES = 20
 
         // サイト側の tool_mobile_get_autologin_key レート制限 (6分) に合わせる
         private const val AUTOLOGIN_KEY_MIN_INTERVAL_MILLIS = 6 * 60 * 1000L
 
-        fun shouldFetchNextPage(pageSize: Int, received: Int, pagesFetched: Int): Boolean =
-            pageSize > 0 && received >= pageSize && pagesFetched < MAX_ACTION_EVENT_PAGES
+        fun shouldFetchNextPage(
+            pageSize: Int,
+            received: Int,
+            pagesFetched: Int,
+            maxPages: Int = DEFAULT_ACTION_EVENT_PAGES,
+        ): Boolean = pageSize > 0 && received >= pageSize && pagesFetched < maxPages
 
         fun actionEventsParams(fromEpochSec: Long, limit: Int, afterEventId: Long? = null): Map<String, String> =
             buildMap {
@@ -259,6 +446,29 @@ class MoodleRepository(
                 put("limitnum", limit.toString())
                 afterEventId?.let { put("aftereventid", it.toString()) }
             }
+
+        fun startSubmissionParams(assignId: Long): Map<String, String> =
+            mapOf("assignid" to assignId.toString())
+
+        fun saveOnlineTextParams(assignmentId: Long, htmlText: String): Map<String, String> =
+            mapOf(
+                "assignmentid" to assignmentId.toString(),
+                "plugindata[onlinetext_editor][text]" to htmlText,
+                "plugindata[onlinetext_editor][format]" to "1",
+                "plugindata[onlinetext_editor][itemid]" to "0",
+            )
+
+        fun saveFileSubmissionParams(assignmentId: Long, draftItemId: Long): Map<String, String> =
+            mapOf(
+                "assignmentid" to assignmentId.toString(),
+                "plugindata[files_filemanager]" to draftItemId.toString(),
+            )
+
+        fun submitForGradingParams(assignmentId: Long, acceptSubmissionStatement: Boolean): Map<String, String> =
+            mapOf(
+                "assignmentid" to assignmentId.toString(),
+                "acceptsubmissionstatement" to if (acceptSubmissionStatement) "1" else "0",
+            )
 
         fun forumDiscussionsParams(forumInstanceId: Long): Map<String, String> =
             mapOf(
