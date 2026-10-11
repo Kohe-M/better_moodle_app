@@ -15,7 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -31,16 +30,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -55,7 +53,6 @@ import dev.rits.bettermoodle.data.AssignmentAvailabilityLabel
 import dev.rits.bettermoodle.data.AssignmentGradingLabel
 import dev.rits.bettermoodle.data.AssignmentEditorState
 import dev.rits.bettermoodle.data.AssignmentLoad
-import dev.rits.bettermoodle.data.AssignmentSubmissionLabel
 import dev.rits.bettermoodle.data.AssignmentUiModel
 import dev.rits.bettermoodle.data.MoodleClient
 import dev.rits.bettermoodle.data.MoodleFile
@@ -64,6 +61,7 @@ import dev.rits.bettermoodle.data.SubmissionFileKey
 import dev.rits.bettermoodle.data.SubmissionStatusResponse
 import dev.rits.bettermoodle.data.SubmittedFileUi
 import dev.rits.bettermoodle.data.previewKindFor
+import dev.rits.bettermoodle.ui.theme.AppTheme
 import java.util.Locale
 
 /** 課題ページのMoodle URL (Web Service未対応時・書式付き編集時の逃げ道) */
@@ -131,9 +129,6 @@ fun AssignmentScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { onOpenMoodleWeb(webUrl, title) }) {
-                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Moodleで開く")
-                    }
                     IconButton(onClick = ::requestRefresh, enabled = !state.busy) {
                         Icon(Icons.Filled.Refresh, contentDescription = "再読み込み")
                     }
@@ -249,7 +244,7 @@ fun AssignmentScreen(
                         onOpenFilePreview = onOpenFilePreview,
                         onDownloadFile = { downloadToShare = it },
                     )
-                    AssignmentSummaryCard(assignment, ui)
+                    AssignmentDetails(assignment, ui)
                     FeedbackBlock(load.data.status, onOpenUrl)
                     SubmittedTextSection(ui, onOpenUrl)
                     SubmittedFilesSection(
@@ -497,69 +492,65 @@ private fun OnlineTextEditor(
 }
 
 /**
- * 課題を開いてまず知りたい「いつまで」「今どういう状態か」を最上部に大きく出す。
- * 詳細な日付の一覧は [AssignmentSummaryCard] に任せる。
+ * 課題を開いてまず知りたい「いつまで」「今どういう状態か」を最上部に出す。
+ * 箱で囲まず、大きな日時と状態の札だけ。色は意味色 (24時間以内 = 琥珀、期限切れ = 朱、提出済み = 緑) のみ。
+ * 詳細な日付の一覧は [AssignmentDetails] に任せる。
  */
 @Composable
 private fun AssignmentStatusHero(assignment: Assignment, ui: AssignmentUiModel) {
     val c = MaterialTheme.colorScheme
-    val (container, onContainer, accent) = when (ui.availability) {
-        AssignmentAvailabilityLabel.DueSoon,
-        AssignmentAvailabilityLabel.Overdue,
-        -> Triple(c.errorContainer, c.onErrorContainer, c.error)
+    val t = AppTheme.colors
+    // 状態色は面を塗らず文字色だけに使い、札の文言と併用する
+    val (accent, container, onContainer) = when (ui.availability) {
+        AssignmentAvailabilityLabel.DueSoon -> Triple(t.warning, t.surfaceSunken, t.warning)
+        AssignmentAvailabilityLabel.Overdue -> Triple(t.danger, t.surfaceSunken, t.danger)
         AssignmentAvailabilityLabel.Submitted,
         AssignmentAvailabilityLabel.Graded,
-        -> Triple(c.secondaryContainer, c.onSecondaryContainer, c.secondary)
-        else -> Triple(c.primaryContainer, c.onPrimaryContainer, c.primary)
+        -> Triple(t.success, t.surfaceSunken, t.success)
+        else -> Triple(c.onSurface, t.surfaceSunken, t.ink)
     }
-    AppCard(containerColor = container, contentColor = onContainer, border = null) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text("提出期限", style = MaterialTheme.typography.labelMedium, color = onContainer.copy(alpha = 0.8f))
-            Text(
-                formatAssignmentTime(assignment.duedate),
-                style = MaterialTheme.typography.titleLarge,
-                color = onContainer,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
-                StatusPill(ui.availability.text, containerColor = accent, contentColor = container)
-                // 「提出済み / 提出済み」のように同じ語が並ぶのを避ける
-                if (ui.submission.text != ui.availability.text) {
-                    StatusPill(
-                        ui.submission.text,
-                        containerColor = onContainer.copy(alpha = 0.12f),
-                        contentColor = onContainer,
-                    )
-                }
-                if (ui.grading == AssignmentGradingLabel.Graded) {
-                    StatusPill(
-                        ui.grading.text,
-                        containerColor = onContainer.copy(alpha = 0.12f),
-                        contentColor = onContainer,
-                    )
-                }
+    val nowSec = System.currentTimeMillis() / 1000
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        val remaining = assignment.duedate.takeIf { it > 0L && it >= nowSec }?.let { remainingLabel(nowSec, it) }
+        Text(
+            listOfNotNull("提出期限", remaining).joinToString(" · "),
+            style = MaterialTheme.typography.labelLarge,
+            color = c.onSurfaceVariant,
+        )
+        Text(
+            formatAssignmentTime(assignment.duedate),
+            style = MaterialTheme.typography.headlineSmall,
+            color = if (ui.availability == AssignmentAvailabilityLabel.DueSoon ||
+                ui.availability == AssignmentAvailabilityLabel.Overdue
+            ) {
+                accent
+            } else {
+                c.onSurface
+            },
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+            StatusPill(ui.availability.text, containerColor = container, contentColor = onContainer)
+            // 「提出済み / 提出済み」のように同じ語が並ぶのを避ける
+            if (ui.submission.text != ui.availability.text) {
+                StatusPill(ui.submission.text)
+            }
+            if (ui.grading == AssignmentGradingLabel.Graded && ui.availability != AssignmentAvailabilityLabel.Graded) {
+                StatusPill(ui.grading.text)
             }
         }
     }
 }
 
+/** 詳細は「ラベル 値」の行を余白で並べる。提出状況は最上部の札に出しているので繰り返さない */
 @Composable
-private fun AssignmentSummaryCard(assignment: Assignment, ui: AssignmentUiModel) {
+private fun AssignmentDetails(assignment: Assignment, ui: AssignmentUiModel) {
     SubsectionTitle("詳細")
-    AppCard {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            SummaryLine("提出状況", ui.submission.text)
-            SummaryLine("採点状況", ui.grading.text)
-            SummaryLine("提出可能期間", formatAssignmentTime(assignment.allowsubmissionsfromdate, suffix = " から"))
-            SummaryLine("締切 (受付終了)", formatAssignmentTime(assignment.cutoffdate))
-            if (ui.hasTimeLimit) SummaryLine("制限時間", formatDuration(assignment.timelimit))
-            SummaryLine("提出後の編集", if (ui.canEdit) "可能" else "不可")
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SummaryLine("採点状況", ui.grading.text)
+        SummaryLine("提出可能期間", formatAssignmentTime(assignment.allowsubmissionsfromdate, suffix = " から"))
+        SummaryLine("締切 (受付終了)", formatAssignmentTime(assignment.cutoffdate))
+        if (ui.hasTimeLimit) SummaryLine("制限時間", formatDuration(assignment.timelimit))
+        SummaryLine("提出後の編集", if (ui.canEdit) "できる" else "できない")
     }
 }
 
@@ -574,9 +565,6 @@ private fun AssignmentActions(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (AssignmentAction.Start in ui.actions) {
             Button(onClick = onStart, enabled = !busy) { Text("提出を開始 (計測開始)") }
-        }
-        if (AssignmentAction.Edit in ui.actions && ui.submission == AssignmentSubmissionLabel.Submitted) {
-            OutlinedButton(onClick = {}, enabled = false) { Text("提出済み") }
         }
         if (AssignmentAction.FinalSubmit in ui.actions) {
             Button(onClick = onFinalSubmit, enabled = !busy) { Text("最終提出する") }
@@ -665,10 +653,9 @@ private fun FileCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                LeadingIconBox(
+                LeadingIcon(
                     icon = if (file.previewKind == PreviewKind.Pdf) Icons.Filled.PictureAsPdf else Icons.Filled.Description,
                     contentDescription = null,
-                    size = 36.dp,
                 )
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
@@ -715,11 +702,11 @@ private fun FeedbackBlock(status: SubmissionStatusResponse, onOpenUrl: (String, 
         ?.text
     if (grade != null || !feedback.isNullOrBlank()) {
         SubsectionTitle("評価・フィードバック")
-        AppCard(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)) {
+        AppCard {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (grade != null) {
                     Text("評価", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(grade, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.secondary)
+                    Text(grade, style = MaterialTheme.typography.headlineSmall)
                 }
                 if (!feedback.isNullOrBlank()) {
                     HtmlText(

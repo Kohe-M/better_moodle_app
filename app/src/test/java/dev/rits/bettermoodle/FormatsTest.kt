@@ -27,7 +27,7 @@ class FormatsTest {
             zoneId = zoneId,
         )
 
-        assertEquals("7月9日(木) 08:30まで", formatted)
+        assertEquals("7/9(木) 8:30まで", formatted)
     }
 
     @Test
@@ -42,7 +42,7 @@ class FormatsTest {
             zoneId = zoneId,
         )
 
-        assertEquals("2027年1月12日(火) 18:05", formatted)
+        assertEquals("2027/1/12(火) 18:05", formatted)
     }
 
     @Test

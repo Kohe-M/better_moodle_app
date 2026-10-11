@@ -38,8 +38,8 @@ fun PortalScreen(clearSessionTick: Int = 0) {
     var loading by remember { mutableStateOf(true) }
     var mainFrameError by remember { mutableStateOf<MainFrameError?>(null) }
     var observedClearSessionTick by remember { mutableIntStateOf(clearSessionTick) }
-    // タブを切り替えて戻ったときに履歴と表示中のページを復元する (G09)。
-    // 下部タブの NavHost が saveState/restoreState するので、この Bundle も保持される
+    // 画面の作り直し (回転・プロセス再生成) のあとに履歴と表示中のページを復元する (G09)。
+    // ポータルはコースタブから push する画面なので、戻る操作で閉じたときは破棄される
     val webState = rememberSaveable { Bundle() }
     val context = LocalContext.current
 

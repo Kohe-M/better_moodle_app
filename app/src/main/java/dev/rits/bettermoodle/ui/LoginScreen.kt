@@ -14,20 +14,21 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -43,8 +44,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URI
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.School
 
 private const val LOGIN_POLLING_TIMEOUT_MILLIS = 10 * 60 * 1000L
 
@@ -268,23 +267,25 @@ fun LoginScreen(onToken: suspend (SsoLogin.Tokens) -> Boolean) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        LeadingIconBox(
-            Icons.Filled.School,
-            contentDescription = null,
-            size = 72.dp,
-            tint = MaterialTheme.colorScheme.onPrimary,
-            containerColor = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.height(20.dp))
+        EmptyIllustration()
+        Spacer(Modifier.height(32.dp))
         Text("Moodle+R Companion", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
         Spacer(Modifier.height(8.dp))
         Text(
-            "時間割・課題締切・シラバス・ポータルをひとつのアプリで",
+            "時間割・締切・シラバス・ポータルをひとつに",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(36.dp))
+        Spacer(Modifier.height(4.dp))
+        // 非公式クライアントであることを誤認させない (DESIGN.md §13)
+        Text(
+            "非公式アプリです (大学・Moodle公式ではありません)",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(48.dp))
         Button(
             onClick = {
                 if (probing) return@Button
@@ -297,9 +298,9 @@ fun LoginScreen(onToken: suspend (SsoLogin.Tokens) -> Boolean) {
                 }
             },
             enabled = !probing,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
-            Text(if (probing) "確認中..." else "立命館アカウントでログイン")
+            Text(if (probing) "確認中..." else "立命館アカウントでログイン", style = MaterialTheme.typography.labelLarge)
         }
         if (BuildConfig.DEBUG) {
             Spacer(Modifier.height(16.dp))

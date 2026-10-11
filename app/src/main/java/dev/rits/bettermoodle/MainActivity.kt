@@ -10,22 +10,12 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material.icons.filled.Alarm
-import androidx.compose.material.icons.filled.CalendarViewMonth
-import androidx.compose.material.icons.filled.CleaningServices
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Public
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,18 +24,12 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -69,7 +53,6 @@ import dev.rits.bettermoodle.data.parseMoodleUrlTarget
 import dev.rits.bettermoodle.data.previewKindFor
 import dev.rits.bettermoodle.ui.AssignmentScreen
 import dev.rits.bettermoodle.ui.CourseScreen
-import dev.rits.bettermoodle.ui.CourseListScreen
 import dev.rits.bettermoodle.ui.DeadlinesScreen
 import dev.rits.bettermoodle.ui.FilePreviewScreen
 import dev.rits.bettermoodle.ui.ForumDiscussionScreen
@@ -85,6 +68,49 @@ import dev.rits.bettermoodle.ui.SyllabusScreen
 import dev.rits.bettermoodle.ui.TimetableScreen
 import dev.rits.bettermoodle.ui.openInCustomTab
 import dev.rits.bettermoodle.ui.theme.BetterMoodleTheme
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.automirrored.filled.Assignment
+import androidx.compose.material.icons.automirrored.outlined.Assignment
+import androidx.compose.material.icons.filled.CalendarViewWeek
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.outlined.CalendarViewWeek
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import dev.rits.bettermoodle.data.ActionEvent
+import dev.rits.bettermoodle.ui.AccentDot
+import dev.rits.bettermoodle.ui.CoursesScreen
+import dev.rits.bettermoodle.ui.LocalCourseColors
+import dev.rits.bettermoodle.ui.SettingsScreen
+import dev.rits.bettermoodle.ui.SubScreenScaffold
+import dev.rits.bettermoodle.ui.TodayScreen
+import dev.rits.bettermoodle.ui.UiState
+import dev.rits.bettermoodle.ui.formatTitleDate
+import dev.rits.bettermoodle.ui.openDeadlineEvent
+import dev.rits.bettermoodle.ui.rememberLoadable
+import dev.rits.bettermoodle.ui.theme.AppTheme
+import dev.rits.bettermoodle.ui.theme.Spacing
+import java.time.LocalDate
 import dev.rits.bettermoodle.work.DeadlineWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -93,6 +119,9 @@ import java.net.URI
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // システムバーのアイコン色を端末のダークモードに合わせる (テーマの windowLightStatusBar 固定だと
+        // ダークモードで canvas の上に暗いアイコンが並んで見えない)。API 35 未満も API 35+ と同じ edge-to-edge にそろえる
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val container = (application as App).container
         // cold start・プロセス再生成・既存Activityへの onNewIntent のどれでも同じ経路で宛先を保持し、
@@ -101,7 +130,10 @@ class MainActivity : ComponentActivity() {
         consumeDeepLink(intent, explicit = savedInstanceState == null)
         setContent {
             BetterMoodleTheme {
-                Root(container)
+                // 画面ごとの Scaffold の外側 (ログイン画面など) も canvas にする
+                Box(Modifier.fillMaxSize().background(AppTheme.colors.canvas)) {
+                    Root(container)
+                }
             }
         }
     }
@@ -153,9 +185,12 @@ private fun Root(container: AppContainer) {
         AuthState.Unknown -> return // DataStore読み込み待ち
         AuthState.LoggedOut -> {
             // 永続化と状態更新はセッション管理側 (アプリ scope) が排他して行う
-            LoginScreen(onToken = { tokens: SsoLogin.Tokens ->
-                container.authSession.login(tokens.wsToken, tokens.privateToken).await()
-            })
+            // ログイン画面 (SSO の WebView を含む) は Scaffold を持たないので、システムバーとキーボードを避ける
+            Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                LoginScreen(onToken = { tokens: SsoLogin.Tokens ->
+                    container.authSession.login(tokens.wsToken, tokens.privateToken).await()
+                })
+            }
             return
         }
         // 世代ごとにNavHostを作り直す (別アカウントで再ログインしたときに前の画面スタックを残さない)
@@ -223,17 +258,31 @@ private fun LoggedInRoot(container: AppContainer) {
         container.pendingDeepLink.compareAndSet(link, null)
     }
 
+    val courseColors by container.courseColorStore.state.collectAsState()
+    CompositionLocalProvider(LocalCourseColors provides courseColors) {
     NavHost(navController = rootNav, startDestination = "main") {
         composable("main") { MainTabs(container, rootNav, onOpenUrl = ::openUrl) }
 
-        composable("courses") {
-            CourseListScreen(
-                container = container,
-                onBack = { rootNav.popBackStack() },
-                onOpenCourse = { id, name, code ->
-                    rootNav.navigateFromUser(courseRoute(id, name, code))
-                },
-            )
+        composable("notifications") {
+            SubScreenScaffold(title = "通知", onBack = { rootNav.popBackStack() }) {
+                NotificationsScreen(container, onOpenUrl = ::openUrl)
+            }
+        }
+
+        composable("syllabus") {
+            SubScreenScaffold(title = "シラバス", onBack = { rootNav.popBackStack() }) {
+                SyllabusScreen(container)
+            }
+        }
+
+        composable("portal") {
+            SubScreenScaffold(title = "スチューデントポータル", onBack = { rootNav.popBackStack() }) {
+                PortalScreen()
+            }
+        }
+
+        composable("settings") {
+            SettingsScreen(container, onBack = { rootNav.popBackStack() })
         }
 
         composable("course/{courseId}?name={name}&code={code}") { entry ->
@@ -447,6 +496,7 @@ private fun LoggedInRoot(container: AppContainer) {
             )
         }
     }
+    }
 }
 
 // コース名・コードはナビゲーション引数で受け渡す (クエリ文字列)
@@ -460,6 +510,7 @@ private data class NavItem(
     val route: String,
     val label: String,
     val icon: ImageVector,
+    val selectedIcon: ImageVector,
 )
 
 private fun courseRoute(id: Long, name: String, code: String?): String =
@@ -612,7 +663,10 @@ private fun debugUrlLabel(url: String): String {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * トップレベルのタブ (DESIGN.md §2)。今日 / 時間割 / 課題 / コース の4つ。
+ * タブはトップレベル遷移専用で、アクションは入れない。通知は今日タブの右上、設定はコースタブの右上から開く。
+ */
 @Composable
 private fun MainTabs(
     container: AppContainer,
@@ -620,90 +674,133 @@ private fun MainTabs(
     onOpenUrl: (url: String, title: String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    var showLogout by remember { mutableStateOf(false) }
-    var showClearWebSessions by remember { mutableStateOf(false) }
-    var portalClearSessionTick by remember { mutableIntStateOf(0) }
-
     val navController = rememberNavController()
     val items = listOf(
-        NavItem("timetable", "時間割", Icons.Filled.CalendarViewMonth),
-        NavItem("deadlines", "締切", Icons.Filled.Alarm),
-        NavItem("notifications", "通知", Icons.Filled.Notifications),
-        NavItem("syllabus", "シラバス", Icons.AutoMirrored.Filled.MenuBook),
-        NavItem("portal", "ポータル", Icons.Filled.Public),
+        NavItem("today", "今日", Icons.Outlined.WbSunny, Icons.Filled.WbSunny),
+        NavItem("timetable", "時間割", Icons.Outlined.CalendarViewWeek, Icons.Filled.CalendarViewWeek),
+        NavItem("deadlines", "課題", Icons.AutoMirrored.Outlined.Assignment, Icons.AutoMirrored.Filled.Assignment),
+        NavItem("courses", "コース", Icons.Outlined.School, Icons.Filled.School),
     )
     val backStack by navController.currentBackStackEntryAsState()
-    val currentRoute = backStack?.destination?.route
+    val currentRoute = backStack?.destination?.route ?: "today"
+    val todayList = rememberLazyListState()
+    val badge by container.deadlineBadge.collectAsState()
+    // 通知の未読 (今日タブ右上のドット)。通知画面とキャッシュを共有する
+    val (notifications, _) = rememberLoadable("notifications") { container.moodleRepository.notifications() }
+    // 取得後にアプリ内で既読にした分は差し引く (次の再取得まで点が残らないように)
+    val readSync by container.notificationReadSync.state.collectAsState()
+    val unread = (notifications as? UiState.Success)?.data?.let { page ->
+        val readLocally = page.notifications.count { !it.read && it.id in readSync.readIds }
+        (page.unreadCount - readLocally).coerceAtLeast(0)
+    } ?: 0
 
     fun openCourse(id: Long, name: String, code: String?) {
         rootNav.navigateFromUser(courseRoute(id, name, code))
     }
 
+    fun openDeadline(event: ActionEvent) = openDeadlineEvent(
+        event,
+        onOpenUrl = onOpenUrl,
+        onOpenAssignment = { courseId, moduleId, assignId, title ->
+            rootNav.navigateFromUser("assignment/$courseId/$moduleId/$assignId?title=${Uri.encode(title)}")
+        },
+        onOpenQuiz = { target, title -> rootNav.navigateFromUser(quizRoute(target, title)) },
+    )
+
+    fun selectTab(route: String) {
+        navController.navigate(route) {
+            popUpTo(navController.graph.startDestinationId) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
     Scaffold(
+        containerColor = AppTheme.colors.canvas,
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        items.firstOrNull { it.route == currentRoute }?.label ?: "Moodle+R",
-                        style = MaterialTheme.typography.titleLarge,
-                    )
-                },
-                actions = {
-                    if (currentRoute == "timetable") {
-                        IconButton(onClick = { rootNav.navigateFromUser("courses") }) {
-                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = "すべてのコース")
+            when (currentRoute) {
+                "today" -> TabHeader(
+                    title = "今日",
+                    subtitle = formatTitleDate(LocalDate.now()),
+                    // タイトルをタップで今日の先頭へ戻る (Fantastical)
+                    onTitleClick = { scope.launch { todayList.animateScrollToItem(0) } },
+                ) {
+                    IconButton(onClick = { rootNav.navigateFromUser("notifications") }) {
+                        BadgedBox(badge = { if (unread > 0) AccentDot() }) {
+                            Icon(
+                                Icons.Outlined.Notifications,
+                                contentDescription = if (unread > 0) "通知 (未読${unread}件)" else "通知",
+                            )
                         }
                     }
-                    if (currentRoute == "portal") {
-                        IconButton(onClick = { showClearWebSessions = true }) {
-                            Icon(Icons.Filled.CleaningServices, contentDescription = "Webセッションを削除")
-                        }
+                }
+                "timetable" -> TabHeader(title = "時間割")
+                "deadlines" -> TabHeader(title = "課題")
+                else -> TabHeader(title = "コース") {
+                    IconButton(onClick = { rootNav.navigateFromUser("settings") }) {
+                        Icon(Icons.Outlined.Settings, contentDescription = "設定")
                     }
-                    IconButton(onClick = { showLogout = true }) {
-                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "ログアウト")
-                    }
-                },
-                expandedHeight = 52.dp,
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
-            )
+                }
+            }
         },
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-                items.forEach { item ->
-                    NavigationBarItem(
-                        selected = currentRoute == item.route,
-                        onClick = {
-                            navController.navigate(item.route) {
-                                popUpTo(navController.graph.startDestinationId) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = { Icon(item.icon, contentDescription = item.label) },
-                        label = { Text(item.label) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                    )
+            Column {
+                HorizontalDivider(thickness = 0.5.dp, color = AppTheme.colors.hairline)
+                NavigationBar(containerColor = AppTheme.colors.surface, tonalElevation = 0.dp) {
+                    items.forEach { item ->
+                        val selected = currentRoute == item.route
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick = {
+                                if (selected && item.route == "today") {
+                                    scope.launch { todayList.animateScrollToItem(0) }
+                                } else {
+                                    selectTab(item.route)
+                                }
+                            },
+                            icon = {
+                                val icon = if (selected) item.selectedIcon else item.icon
+                                if (item.route == "deadlines" && badge > 0) {
+                                    BadgedBox(badge = {
+                                        Badge(containerColor = AppTheme.colors.warning, contentColor = AppTheme.colors.surface) {
+                                            Text("$badge")
+                                        }
+                                    }) { Icon(icon, contentDescription = "24時間以内の締切 ${badge}件") }
+                                } else {
+                                    Icon(icon, contentDescription = null)
+                                }
+                            },
+                            label = { Text(item.label, style = MaterialTheme.typography.labelLarge) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = AppTheme.colors.accent,
+                                selectedTextColor = AppTheme.colors.accent,
+                                indicatorColor = AppTheme.colors.accentSoft,
+                                unselectedIconColor = AppTheme.colors.inkSecondary,
+                                unselectedTextColor = AppTheme.colors.inkSecondary,
+                            ),
+                        )
+                    }
                 }
             }
         },
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = "timetable",
+            startDestination = "today",
             modifier = Modifier.padding(padding),
         ) {
-            composable("timetable") { TimetableScreen(container, onOpenCourse = ::openCourse) }
+            composable("today") {
+                TodayScreen(
+                    container = container,
+                    listState = todayList,
+                    onOpenCourse = ::openCourse,
+                    onOpenDeadline = ::openDeadline,
+                    onSeeAllDeadlines = { selectTab("deadlines") },
+                )
+            }
+            composable("timetable") {
+                TimetableScreen(container, onOpenCourse = ::openCourse, onOpenDeadline = ::openDeadline)
+            }
             composable("deadlines") {
                 DeadlinesScreen(
                     container = container,
@@ -718,56 +815,52 @@ private fun MainTabs(
                     },
                 )
             }
-            composable("notifications") { NotificationsScreen(container, onOpenUrl = onOpenUrl) }
-            composable("syllabus") { SyllabusScreen(container) }
-            composable("portal") {
-                PortalScreen(clearSessionTick = portalClearSessionTick)
+            composable("courses") {
+                CoursesScreen(
+                    container = container,
+                    onOpenCourse = ::openCourse,
+                    onOpenSyllabus = { rootNav.navigateFromUser("syllabus") },
+                    onOpenPortal = { rootNav.navigateFromUser("portal") },
+                )
             }
         }
     }
+}
 
-    if (showClearWebSessions) {
-        AlertDialog(
-            onDismissRequest = { showClearWebSessions = false },
-            title = { Text("Webセッションを削除") },
-            text = { Text("Moodle側のWebログイン状態も削除されます。よろしいですか?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showClearWebSessions = false
-                    scope.launch {
-                        container.clearAllWebSessions()
-                        portalClearSessionTick++
-                    }
-                }) { Text("削除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearWebSessions = false }) { Text("キャンセル") }
-            },
-        )
-    }
-
-    if (showLogout) {
-        val draftCount = remember { container.savedDraftCount() }
-        AlertDialog(
-            onDismissRequest = { showLogout = false },
-            title = { Text("ログアウト") },
-            text = {
+/** タブの大タイトル (display 28/700)。今日タブは日付を添える */
+@Composable
+private fun TabHeader(
+    title: String,
+    subtitle: String? = null,
+    onTitleClick: (() -> Unit)? = null,
+    actions: @Composable () -> Unit = {},
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AppTheme.colors.canvas)
+            .statusBarsPadding()
+            .padding(start = Spacing.lg, end = Spacing.xs, top = Spacing.sm, bottom = Spacing.xs),
+    ) {
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            modifier = Modifier
+                .weight(1f)
+                .then(if (onTitleClick != null) Modifier.clickable(onClickLabel = "先頭へ戻る", onClick = onTitleClick) else Modifier)
+                .semantics(mergeDescendants = true) { heading() },
+        ) {
+            Text(title, style = MaterialTheme.typography.headlineMedium, color = AppTheme.colors.ink)
+            if (subtitle != null) {
+                Spacer(Modifier.width(Spacing.sm))
                 Text(
-                    "保存されたトークンとキャッシュを削除します。" +
-                        (if (draftCount > 0) "\n\n未送信の課題の下書きが${draftCount}件あります。ログアウトすると下書きも削除されます。" else "") +
-                        "\n\nよろしいですか?",
+                    subtitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = AppTheme.colors.inkSecondary,
+                    modifier = Modifier.padding(bottom = Spacing.xxs),
                 )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showLogout = false
-                    // 画面 scope ではなくセッション管理側が完了まで所有する
-                    container.logout()
-                }) { Text("ログアウト") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLogout = false }) { Text("キャンセル") }
-            },
-        )
+            }
+        }
+        actions()
     }
 }

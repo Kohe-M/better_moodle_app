@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -15,28 +14,29 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Assignment
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.NotificationsNone
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
@@ -46,6 +46,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.jsoup.Jsoup
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -106,22 +107,16 @@ fun NotificationsScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            NotificationFilter.entries.forEach { f ->
-                FilterChip(
-                    selected = filter == f,
-                    onClick = { filter = f },
-                    label = { Text(f.label) },
+        // 更新失敗の表示は 0件・フィルタ0件の表示より外側に置く
+        StaleDataBanner(state, onRetry = refresh)
+        readSync.failed.entries.firstOrNull()?.let { (_, reason) ->
+            Column(Modifier.padding(horizontal = ScreenGutter, vertical = 8.dp)) {
+                MessageBanner(
+                    "既読にできなかった通知があります ($reason)。Moodle側では未読のままです。もう一度開くと再試行します。",
+                    isError = true,
+                    onDismiss = null,
                 )
             }
-        }
-        // 更新失敗のバナーは 0件・フィルタ0件の表示より外側に置く
-        StaleDataBanner(state, onRetry = refresh)
-        readSync.failed.entries.firstOrNull()?.let { (id, reason) ->
-            MessageBanner("通知 #$id を既読にできませんでした ($reason)。もう一度開くと再試行します。", isError = true, onDismiss = null)
         }
         PullToRefreshBox(
             isRefreshing = state.isRefreshing,
@@ -130,7 +125,11 @@ fun NotificationsScreen(
         ) {
             when (val s = state) {
                 is UiState.Loading -> LoadingBox()
-                is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
+                is UiState.Error -> ErrorBox(
+                    "${s.message}。Moodleからの通知を表示できません。",
+                    onRetry = refresh,
+                    title = "通知を読み込めませんでした",
+                )
                 is UiState.Success -> {
                     val lastPage = extraPages.lastOrNull() ?: s.data
                     val all = (s.data.notifications + extraPages.flatMap { it.notifications })
@@ -143,27 +142,55 @@ fun NotificationsScreen(
                             NotificationFilter.OTHER -> !it.isAssignRelated()
                         }
                     }
+                    val (unread, read) = filtered.partition { !it.read }
+                    val filterMenu: @Composable () -> Unit = {
+                        NotificationFilterMenu(filter, onSelect = { filter = it })
+                    }
                     if (filtered.isEmpty() && !lastPage.hasMore) {
-                        EmptyBox(
-                            if (all.isEmpty()) "通知はありません" else "このフィルタに該当する通知はありません",
-                            onRetry = refresh,
-                            icon = Icons.Outlined.NotificationsNone,
-                        )
+                        Column(Modifier.fillMaxSize()) {
+                            SectionLabel("", trailing = filterMenu)
+                            EmptyBox(
+                                if (all.isEmpty()) "通知はありません" else "「${filter.label}」の通知はありません",
+                                if (all.isEmpty()) {
+                                    "Moodleからの新しい連絡はここに届きます。"
+                                } else {
+                                    "ほかの通知は右上の切り替えで表示できます。"
+                                },
+                            )
+                        }
                         return@PullToRefreshBox
                     }
-                    LazyColumn(
-                        contentPadding = ListContentPadding,
-                        verticalArrangement = Arrangement.spacedBy(ListItemSpacing),
-                    ) {
-                        items(filtered, key = { it.id }) { n ->
-                            NotificationCard(n) {
-                                markRead(n)
-                                val contextUrl = n.contexturl?.takeIf { it.isNotBlank() }
-                                if (contextUrl != null) {
-                                    onOpenUrl(contextUrl, n.contexturlname ?: n.subject)
+                    fun openNotification(n: PopupNotification) {
+                        markRead(n)
+                        val contextUrl = n.contexturl?.takeIf { it.isNotBlank() }
+                        if (contextUrl != null) {
+                            onOpenUrl(contextUrl, n.contexturlname ?: n.subject)
+                        } else {
+                            selectedNotification = n
+                        }
+                    }
+                    LazyColumn(contentPadding = RowListPadding) {
+                        // 見出しの右に1つだけフィルタを置く (まれにしか使わないので常設の行にしない)
+                        item(key = "unread-header") {
+                            SectionLabel(
+                                if (unread.isEmpty()) "未読はありません" else "未読 ${unread.size}件",
+                                color = if (unread.isEmpty()) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
                                 } else {
-                                    selectedNotification = n
-                                }
+                                    MaterialTheme.colorScheme.primary
+                                },
+                                trailing = filterMenu,
+                            )
+                        }
+                        items(unread, key = { it.id }) { n ->
+                            NotificationRow(n) { openNotification(n) }
+                            RowDivider(inset = NotificationTextInset)
+                        }
+                        if (read.isNotEmpty()) {
+                            item(key = "read-header") { SectionLabel("既読") }
+                            items(read, key = { it.id }) { n ->
+                                NotificationRow(n) { openNotification(n) }
+                                RowDivider(inset = NotificationTextInset)
                             }
                         }
                         if (lastPage.hasMore || loadMoreError != null) {
@@ -197,68 +224,79 @@ private fun PopupNotification.isAssignRelated(): Boolean =
         subject.contains("課題") || subject.contains("提出")
 
 @Composable
-private fun NotificationCard(n: PopupNotification, onClick: () -> Unit) {
-    val time = Instant.ofEpochSecond(n.timecreated)
-        .atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("M/d HH:mm"))
-    val unread = !n.read
-    val assignRelated = n.isAssignRelated()
-    // 未読は太字+濃い背景、既読は通常の太さ+薄い文字で「読む必要があるもの」を浮かせる
-    AppCard(
-        onClick = onClick,
-        containerColor = if (unread) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            LeadingIconBox(
-                icon = if (assignRelated) Icons.AutoMirrored.Filled.Assignment else Icons.Outlined.Notifications,
-                contentDescription = null,
-                tint = if (unread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                containerColor = if (unread) {
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f)
-                },
-                size = 36.dp,
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    MetaText(time, modifier = Modifier.weight(1f))
-                    if (unread) {
-                        Box(
-                            Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary),
-                        )
-                    }
-                }
-                Text(
-                    n.subject,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = if (unread) FontWeight.Bold else FontWeight.Medium,
-                    color = if (unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+private fun NotificationFilterMenu(filter: NotificationFilter, onSelect: (NotificationFilter) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }) {
+            Text(filter.label, style = MaterialTheme.typography.labelLarge)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = "表示する通知を選ぶ")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            NotificationFilter.entries.forEach { f ->
+                DropdownMenuItem(
+                    text = { Text(f.label) },
+                    onClick = {
+                        expanded = false
+                        onSelect(f)
+                    },
                 )
-                n.smallmessage?.takeIf { it.isNotBlank() }?.let { msg ->
-                    val plain = Jsoup.parse(msg).text()
-                    // 件名と同じ本文を繰り返さない (Moodleの通知は件名=本文のことが多い)
-                    if (plain.trim() != n.subject.trim()) {
-                        Text(
-                            plain,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+            }
+        }
+    }
+}
+
+/** 本文の開始位置 (未読の点の分だけ字下げ)。区切り線もここから引く */
+private val NotificationTextInset = 32.dp
+
+private val TodayTime: DateTimeFormatter = DateTimeFormatter.ofPattern("H:mm")
+private val OtherDay: DateTimeFormatter = DateTimeFormatter.ofPattern("M/d")
+
+/**
+ * 通知の1行。未読は藍の点と本文色の件名、既読は点なし・薄い件名。
+ * 太字は使わず、点とコントラストで未読を浮かせる。
+ */
+@Composable
+private fun NotificationRow(n: PopupNotification, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    val created = Instant.ofEpochSecond(n.timecreated).atZone(ZoneId.systemDefault())
+    val time = if (created.toLocalDate() == LocalDate.now()) created.format(TodayTime) else created.format(OtherDay)
+    val unread = !n.read
+    ListRow(onClick = onClick, contentPadding = PaddingValues(end = ScreenGutter, top = 12.dp, bottom = 12.dp)) {
+        Box(Modifier.width(NotificationTextInset).padding(top = 7.dp), contentAlignment = Alignment.Center) {
+            if (unread) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .background(c.primary, CircleShape)
+                        .semantics { contentDescription = "未読" },
+                )
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                n.subject,
+                style = MaterialTheme.typography.titleMedium,
+                color = if (unread) c.onSurface else c.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            n.smallmessage?.takeIf { it.isNotBlank() }?.let { msg ->
+                val plain = Jsoup.parse(msg).text()
+                // 件名と同じ本文を繰り返さない (Moodleの通知は件名=本文のことが多い)
+                if (plain.trim() != n.subject.trim()) {
+                    Text(
+                        plain,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
                 }
             }
         }
+        Spacer(Modifier.width(12.dp))
+        MetaText(time, modifier = Modifier.padding(top = 3.dp))
     }
 }
 

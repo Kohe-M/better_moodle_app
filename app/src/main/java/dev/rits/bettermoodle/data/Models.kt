@@ -197,6 +197,25 @@ fun timetableCellsConnected(above: List<TimetableEntry>, below: List<TimetableEn
     return belowEntry.courseCode == null && courseUrl != null && courseUrl == belowEntry.courseUrl
 }
 
+/**
+ * 履修中コースのうち時間割ブロックに載らない授業 (卒業研究・オンデマンド科目など)。
+ * 授業コードのないコース (学部からのお知らせ等) は授業ではないので含めない。
+ * コースIDで照合し、IDの取れないコマは授業コードで照合する。並びは [courses] の順を保つ。
+ */
+fun coursesOutsideTimetable(courses: List<Course>, timetable: Timetable): List<Course> {
+    val timetableIds = timetable.entries.mapNotNullTo(HashSet()) { it.courseId }
+    val codesWithoutId = timetable.entries
+        .filter { it.courseId == null }
+        .mapNotNullTo(HashSet()) { it.courseCode }
+    return courses.filter { course ->
+        val code = course.courseCode
+        course.hidden != true &&
+            code != null &&
+            course.id !in timetableIds &&
+            code !in codesWithoutId
+    }
+}
+
 /** (dayIdx, period) のセルが属する連結ランの先頭時限を返す */
 fun timetableRunStartPeriod(
     byCell: Map<Pair<Int, Int>, List<TimetableEntry>>,

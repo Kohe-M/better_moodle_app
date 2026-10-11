@@ -1,59 +1,106 @@
 package dev.rits.bettermoodle.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Assignment
-import androidx.compose.material.icons.filled.Event
-import androidx.compose.material.icons.filled.Quiz
-import androidx.compose.material.icons.outlined.EventAvailable
+import androidx.compose.material.icons.automirrored.outlined.Assignment
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Quiz
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.ActionEvent
 import dev.rits.bettermoodle.data.ActionEventPage
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
+import dev.rits.bettermoodle.data.Course
+import dev.rits.bettermoodle.data.DeadlineDoneStore
 import dev.rits.bettermoodle.data.QuizTarget
 import dev.rits.bettermoodle.data.parseCourseModuleIdFromUrl
+import dev.rits.bettermoodle.ui.theme.AppTheme
+import dev.rits.bettermoodle.ui.theme.Motion
+import dev.rits.bettermoodle.ui.theme.Sizes
+import dev.rits.bettermoodle.ui.theme.Spacing
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import java.time.ZonedDateTime
+
+/** 期限切れも一覧に出すため、少し前から取得する (Moodle のタイムラインと同じ 14日) */
+internal const val DEADLINE_LOOKBACK_SEC = 14L * 24 * 3600
+
+/** 締切の読み込み (今日画面と課題画面で同じキャッシュを共有する) */
+@Composable
+internal fun rememberDeadlines(container: AppContainer, fromEpochSec: Long): Pair<UiState<ActionEventPage>, () -> Unit> =
+    rememberLoadable("deadlines") { container.moodleRepository.upcomingDeadlines(fromEpochSec) }
+
+/** 課題タブのバッジ (24時間以内の未完了件数) を更新する */
+@Composable
+internal fun PublishDeadlineBadge(container: AppContainer, events: List<ActionEvent>?, done: Set<String>) {
+    LaunchedEffect(events, done) {
+        if (events == null) return@LaunchedEffect
+        val now = Instant.now().epochSecond
+        container.deadlineBadge.value = events.count {
+            it.timesort in now until now + 24 * 3600 && DeadlineDoneStore.keyOf(it) !in done
+        }
+    }
+}
+
+private enum class DeadlineFilter(val label: String) { All("すべて"), Open("未完了") }
 
 /**
- * 課題締切だけを集めた画面。「通知がごちゃまぜ」問題への回答。
+ * 課題タブ (DESIGN.md §8.3・§9)。
+ * フィルタ → 期限切れ / 今日 / 明日 / 今週 / 来週以降 のセクション → 完了の折りたたみ。
  * core_calendar_get_action_events_by_timesort を assign/quiz 等に絞って表示。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,13 +111,10 @@ fun DeadlinesScreen(
     onOpenAssignment: (courseId: Long, moduleId: Long, assignId: Long, title: String) -> Unit = { _, _, _, _ -> },
     onOpenQuiz: (target: QuizTarget, title: String) -> Unit = { _, _ -> },
 ) {
-    // 更新世代: 明示的な更新のたびに検索開始時刻を取り直し、追加ページも捨てる。
-    // 追加取得中は同じ世代 (同じ開始時刻) のスナップショットを使う
+    // 更新世代: 明示的な更新のたびに検索開始時刻を取り直し、追加ページも捨てる
     var generation by rememberSaveable { mutableIntStateOf(0) }
-    val fromEpochSec = remember(generation) { Instant.now().epochSecond - 3600 }
-    val (state, reloadFirstPage) = rememberLoadable("deadlines") {
-        container.moodleRepository.upcomingDeadlines(fromEpochSec)
-    }
+    val fromEpochSec = remember(generation) { Instant.now().epochSecond - DEADLINE_LOOKBACK_SEC }
+    val (state, reloadFirstPage) = rememberDeadlines(container, fromEpochSec)
     val refresh = {
         generation++
         reloadFirstPage()
@@ -80,9 +124,12 @@ fun DeadlinesScreen(
     var loadingMore by remember(generation) { mutableStateOf(false) }
     var loadMoreError by remember(generation) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val done by container.deadlineDoneStore.done.collectAsState()
+    var filter by rememberSaveable { mutableStateOf(DeadlineFilter.All) }
+    var courseFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    var showDone by rememberSaveable { mutableStateOf(false) }
 
     fun loadMore() {
-        // 先頭ページの再取得中は旧カーソルで続きを取らない
         if (state.isRefreshing) return
         val last = extraPages.lastOrNull() ?: firstPage ?: return
         val after = last.nextAfterEventId ?: return
@@ -93,7 +140,6 @@ fun DeadlinesScreen(
         scope.launch {
             try {
                 val page = container.moodleRepository.upcomingDeadlines(fromEpochSec, afterEventId = after)
-                // 取得中に更新されていたら古い世代の続きは捨てる
                 if (requestGeneration == generation) extraPages = extraPages + page
             } catch (e: CancellationException) {
                 throw e
@@ -104,80 +150,344 @@ fun DeadlinesScreen(
         }
     }
 
-    // 更新失敗のバナーは 0件表示より外側に置く (「以前は0件・今回の取得は失敗」を区別する)
-    Column(Modifier.fillMaxSize()) {
-    StaleDataBanner(state, onRetry = refresh)
-    PullToRefreshBox(
-        isRefreshing = state.isRefreshing,
-        onRefresh = refresh,
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        when (val s = state) {
-            is UiState.Loading -> LoadingBox()
-            is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
-            is UiState.Success -> {
-                val lastPage = extraPages.lastOrNull() ?: s.data
-                val allEvents = (s.data.events + extraPages.flatMap { it.events }).distinctBy { it.id }
-                val incompleteReason = (listOf(s.data) + extraPages).firstNotNullOfOrNull { it.incompleteReason }
-                if (allEvents.isEmpty() && !lastPage.hasMore && incompleteReason == null) {
-                    EmptyBox("今後の課題・小テストの締切はありません 🎉", onRetry = refresh, icon = Icons.Outlined.EventAvailable)
-                    return@PullToRefreshBox
-                }
-                val zone = ZoneId.systemDefault()
-                val grouped = allEvents.sortedBy { it.timesort }
-                    .groupBy { Instant.ofEpochSecond(it.timesort).atZone(zone).toLocalDate() }
+    fun open(event: ActionEvent) = openDeadlineEvent(event, onOpenUrl, onOpenAssignment, onOpenQuiz)
+    fun setDone(event: ActionEvent, value: Boolean) = container.deadlineDoneStore.setDone(DeadlineDoneStore.keyOf(event), value)
 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = ListContentPadding,
-                    verticalArrangement = Arrangement.spacedBy(ListItemSpacing),
-                ) {
-                    grouped.entries.forEachIndexed { groupIndex, (date, events) ->
-                        item(key = "header-$date") {
-                            DateHeader(
-                                date = date,
-                                count = events.size,
-                                modifier = Modifier.padding(top = if (groupIndex == 0) 4.dp else 16.dp, bottom = 2.dp),
+    val allEvents = (state as? UiState.Success)?.let { s ->
+        (s.data.events + extraPages.flatMap { it.events }).distinctBy { it.id }.sortedBy { it.timesort }
+    }
+    PublishDeadlineBadge(container, allEvents, done)
+
+    Column(Modifier.fillMaxSize()) {
+        StaleDataBanner(state, onRetry = refresh)
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = refresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            when (val s = state) {
+                is UiState.Loading -> LoadingBox()
+                is UiState.Error -> ErrorBox(
+                    "${s.message}。締切リマインダーの通知は引き続き届きます。",
+                    onRetry = refresh,
+                    title = "課題を読み込めませんでした",
+                )
+                is UiState.Success -> {
+                    val events = allEvents.orEmpty()
+                    val lastPage = extraPages.lastOrNull() ?: s.data
+                    val incompleteReason = (listOf(s.data) + extraPages).firstNotNullOfOrNull { it.incompleteReason }
+                    val nowSec = Instant.now().epochSecond
+                    val now = ZonedDateTime.now(ZoneId.systemDefault())
+                    val courses = events.mapNotNull { it.courseLabel() }.distinct()
+                    val visible = events.filter { courseFilter == null || it.courseLabel() == courseFilter }
+                    val (doneEvents, openEvents) = visible.partition { DeadlineDoneStore.keyOf(it) in done }
+                    // 期限を過ぎて完了扱いにしたものは完了の折りたたみにだけ出す
+                    val sections = openEvents.groupBy { deadlineSectionOf(now, it.timesort) }
+                    val shownDone = if (filter == DeadlineFilter.Open) emptyList() else doneEvents
+
+                    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = RowListPadding) {
+                        item(key = "filters") {
+                            DeadlineFilters(
+                                filter = filter,
+                                onFilter = { filter = it },
+                                courses = courses,
+                                course = courseFilter,
+                                onCourse = { courseFilter = it },
                             )
                         }
-                        items(events, key = { it.id }) { event ->
-                            DeadlineCard(event) {
-                                openDeadlineEvent(
-                                    event = event,
-                                    onOpenUrl = onOpenUrl,
-                                    onOpenAssignment = onOpenAssignment,
-                                    onOpenQuiz = onOpenQuiz,
+                        // 完了扱いだけが残っている場合は、下の「未完了の締切はありません」か完了の折りたたみで示す
+                        if (openEvents.isEmpty() && doneEvents.isEmpty() && !lastPage.hasMore && incompleteReason == null) {
+                            item(key = "empty") {
+                                Box(Modifier.fillMaxWidth().padding(top = Spacing.xxl)) {
+                                    EmptyBox(
+                                        if (courseFilter != null) "このコースの締切はありません" else "締切はありません 🎉",
+                                        "新しい課題が出ると通知でお知らせします。",
+                                    )
+                                }
+                            }
+                        }
+                        if (openEvents.isEmpty() && doneEvents.isNotEmpty()) {
+                            item(key = "all-done") {
+                                MetaText(
+                                    "未完了の締切はありません",
+                                    modifier = Modifier.padding(horizontal = ScreenGutter, vertical = Spacing.xl),
                                 )
                             }
                         }
-                    }
-                    if (incompleteReason != null) {
-                        item(key = "incomplete") {
-                            MessageBanner(
-                                "一覧を最後まで取得できませんでした ($incompleteReason)。表示は全件ではない可能性があります。",
-                                isError = true,
-                                onDismiss = null,
-                            )
+                        DeadlineSection.entries.forEach { section ->
+                            val list = sections[section].orEmpty()
+                            if (list.isEmpty()) return@forEach
+                            item(key = "h-${section.name}") {
+                                SectionLabel(
+                                    section.label,
+                                    modifier = Modifier.animateItem(),
+                                    color = if (section == DeadlineSection.Overdue) AppTheme.colors.danger else AppTheme.colors.inkSecondary,
+                                )
+                            }
+                            items(list, key = { it.id }) { event ->
+                                SwipeToCompleteRow(onComplete = { setDone(event, true) }, modifier = Modifier.animateItem()) {
+                                    DeadlineRow(
+                                        event = event,
+                                        nowSec = nowSec,
+                                        done = false,
+                                        onToggleDone = { setDone(event, it) },
+                                        onClick = { open(event) },
+                                    )
+                                }
+                            }
                         }
-                    }
-                    if (lastPage.hasMore || loadMoreError != null) {
-                        item(key = "load-more") {
-                            LoadMoreRow(
-                                loading = loadingMore,
-                                error = loadMoreError,
-                                label = "まだ先の締切があります",
-                                onLoadMore = ::loadMore,
-                            )
+                        if (shownDone.isNotEmpty()) {
+                            item(key = "done-header") {
+                                DoneHeader(count = shownDone.size, expanded = showDone, onToggle = { showDone = !showDone })
+                            }
+                            if (showDone) {
+                                items(shownDone, key = { "done-${it.id}" }) { event ->
+                                    DeadlineRow(
+                                        event = event,
+                                        nowSec = nowSec,
+                                        done = true,
+                                        onToggleDone = { setDone(event, it) },
+                                        onClick = { open(event) },
+                                        modifier = Modifier.animateItem(),
+                                    )
+                                }
+                            }
                         }
+                        if (incompleteReason != null) {
+                            item(key = "incomplete") {
+                                Column(Modifier.padding(horizontal = ScreenGutter, vertical = Spacing.lg)) {
+                                    MessageBanner(
+                                        "一覧を最後まで取得できませんでした ($incompleteReason)。表示されていない締切があるかもしれません。",
+                                        isError = true,
+                                        onDismiss = null,
+                                    )
+                                }
+                            }
+                        }
+                        if (lastPage.hasMore || loadMoreError != null) {
+                            item(key = "load-more") {
+                                LoadMoreRow(
+                                    loading = loadingMore,
+                                    error = loadMoreError,
+                                    label = "さらに先の締切があります",
+                                    onLoadMore = ::loadMore,
+                                )
+                            }
+                        }
+                        item(key = "sync") { SyncFooter(s) }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun DeadlineFilters(
+    filter: DeadlineFilter,
+    onFilter: (DeadlineFilter) -> Unit,
+    courses: List<String>,
+    course: String?,
+    onCourse: (String?) -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    val colors = FilterChipDefaults.filterChipColors(
+        selectedContainerColor = AppTheme.colors.accentSoft,
+        selectedLabelColor = AppTheme.colors.accent,
+        selectedTrailingIconColor = AppTheme.colors.accent,
+        labelColor = AppTheme.colors.inkSecondary,
+    )
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = ScreenGutter, vertical = Spacing.sm),
+    ) {
+        DeadlineFilter.entries.forEach { f ->
+            FilterChip(selected = filter == f, onClick = { onFilter(f) }, label = { Text(f.label) }, colors = colors)
+        }
+        if (courses.isNotEmpty()) {
+            Box {
+                FilterChip(
+                    selected = course != null,
+                    onClick = { menu = true },
+                    label = { Text(course ?: "コース別", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    trailingIcon = { Icon(Icons.Outlined.ExpandMore, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    colors = colors,
+                )
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("すべてのコース") }, onClick = { menu = false; onCourse(null) })
+                    courses.forEach { name ->
+                        DropdownMenuItem(
+                            text = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            onClick = { menu = false; onCourse(name) },
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
-private fun openDeadlineEvent(
+@Composable
+private fun DoneHeader(count: Int, expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(start = ScreenGutter, end = ScreenGutter, top = Spacing.xl, bottom = Spacing.sm)
+            .semantics { stateDescription = if (expanded) "展開" else "折りたたみ" },
+    ) {
+        Text(
+            "完了（$count）",
+            style = MaterialTheme.typography.labelLarge,
+            color = AppTheme.colors.inkSecondary,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+            contentDescription = null,
+            tint = AppTheme.colors.inkSecondary,
+        )
+    }
+}
+
+/** 右へスワイプで「完了にする (アプリ内のみ)」。行は元の位置に戻り、完了の折りたたみへ移る */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeToCompleteRow(onComplete: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.StartToEnd) onComplete()
+            false
+        },
+    )
+    SwipeToDismissBox(
+        state = state,
+        enableDismissFromEndToStart = false,
+        modifier = modifier,
+        backgroundContent = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(AppTheme.colors.surfaceSunken)
+                    .padding(horizontal = ScreenGutter),
+            ) {
+                Icon(Icons.Outlined.Check, contentDescription = null, tint = AppTheme.colors.inkSecondary)
+                Spacer(Modifier.width(Spacing.sm))
+                Text("完了にする", style = MaterialTheme.typography.labelLarge, color = AppTheme.colors.inkSecondary)
+            }
+        },
+    ) {
+        Box(Modifier.background(AppTheme.colors.canvas)) { content() }
+    }
+}
+
+/**
+ * 締切の1行 (DESIGN.md §8.3):
+ * 完了チェック (48dp) | 授業カラーのドット + 授業名 caption / 種類アイコン + 課題名 body-sm | 締切 caption
+ * 締切の色は必ず文言と併用する。
+ */
+@Composable
+internal fun DeadlineRow(
+    event: ActionEvent,
+    nowSec: Long,
+    done: Boolean,
+    onToggleDone: (Boolean) -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    showCheck: Boolean = true,
+) {
+    val colors = AppTheme.colors
+    val urgency = urgencyOf(nowSec, event.timesort)
+    val label = deadlineLabel(nowSec, event.timesort)
+    val course = event.courseLabel()
+    val cc = courseColor(event.courseCode(), event.course?.id, course.orEmpty())
+    val title = event.activityname ?: event.name
+    // チェック直後に円が塗られるのを見せてから一覧を動かす (Things 3 のチェック感)
+    var checking by remember(event.id, done) { mutableStateOf(false) }
+    LaunchedEffect(checking) {
+        if (checking) {
+            delay(Motion.BASE_MS.toLong())
+            onToggleDone(true)
+        }
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = listOfNotNull(course, title, label, if (done) "完了扱い" else null).joinToString("、")
+                customActions = listOf(
+                    CustomAccessibilityAction(if (done) "未完了に戻す" else "完了にする") {
+                        onToggleDone(!done)
+                        true
+                    },
+                )
+            }
+            .padding(end = ScreenGutter, top = Spacing.md, bottom = Spacing.md),
+    ) {
+        if (showCheck) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(Sizes.hitMin + Spacing.sm, Sizes.hitMin)
+                    // toggleable にしてチェック状態も読み上げる (Role だけでは状態が伝わらない)
+                    .toggleable(value = done || checking, role = Role.Checkbox) { checked ->
+                        when {
+                            checking -> Unit // 完了の反映待ち
+                            !checked -> onToggleDone(false)
+                            else -> checking = true
+                        }
+                    },
+            ) {
+                CheckCircle(checked = done || checking)
+            }
+        } else {
+            Spacer(Modifier.width(ScreenGutter))
+        }
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CourseDot(cc)
+                Spacer(Modifier.width(Spacing.sm))
+                Text(
+                    course ?: "コース不明",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.inkSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = Spacing.xxs)) {
+                Icon(event.kindIcon(), contentDescription = null, tint = colors.inkSecondary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(Spacing.xs))
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (done) colors.inkSecondary else colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.width(Spacing.sm))
+        MetaText(
+            label,
+            color = when {
+                done -> colors.inkSecondary
+                urgency == Urgency.Overdue -> colors.danger
+                urgency == Urgency.Soon -> colors.warning
+                else -> colors.inkSecondary
+            },
+        )
+    }
+}
+
+internal fun openDeadlineEvent(
     event: ActionEvent,
     onOpenUrl: (url: String, title: String) -> Unit,
     onOpenAssignment: (courseId: Long, moduleId: Long, assignId: Long, title: String) -> Unit,
@@ -216,126 +526,14 @@ private fun openDeadlineEvent(
     }
 }
 
-private fun dateLabel(date: LocalDate): String {
-    val today = LocalDate.now()
-    return when (date) {
-        today -> "今日"
-        today.plusDays(1) -> "明日"
-        else -> date.format(DateTimeFormatter.ofPattern("M/d (E)"))
-    }
-}
+internal fun ActionEvent.courseLabel(): String? =
+    course?.fullname?.let { Course(fullname = it).displayName.ifBlank { it } }
 
-/** 日付ごとの見出し。今日・明日は色で区別し、件数を添えて「この日にいくつあるか」を先に伝える。 */
-@Composable
-private fun DateHeader(date: LocalDate, count: Int, modifier: Modifier = Modifier) {
-    val today = LocalDate.now()
-    val accent = when (date) {
-        today -> MaterialTheme.colorScheme.error
-        today.plusDays(1) -> MaterialTheme.colorScheme.tertiary
-        else -> MaterialTheme.colorScheme.primary
-    }
-    val subLabel = when (date) {
-        today, today.plusDays(1) -> date.format(DateTimeFormatter.ofPattern("M/d (E)"))
-        else -> null
-    }
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier.fillMaxWidth()) {
-        Box(
-            Modifier
-                .width(4.dp)
-                .height(18.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(accent),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(dateLabel(date), style = MaterialTheme.typography.titleMedium, color = accent)
-        if (subLabel != null) {
-            Spacer(Modifier.width(6.dp))
-            MetaText(subLabel)
-        }
-        Spacer(Modifier.weight(1f))
-        MetaText("${count}件")
-    }
-}
+internal fun ActionEvent.courseCode(): String? = course?.fullname?.let { Course(fullname = it).courseCode }
 
-/** 残り時間の短い表現。1日以内は時間、それ以上は日数で丸める。 */
-private fun remainingLabel(nowEpochSec: Long, deadlineEpochSec: Long): String? {
-    val diff = deadlineEpochSec - nowEpochSec
-    return when {
-        diff < 0 -> "期限切れ"
-        diff < 3600 -> "あと${maxOf(1, diff / 60)}分"
-        diff < 24 * 3600 -> "あと${diff / 3600}時間"
-        diff < 7 * 24 * 3600 -> "あと${diff / (24 * 3600)}日"
-        else -> null
-    }
-}
-
-@Composable
-private fun DeadlineCard(event: ActionEvent, onClick: () -> Unit) {
-    val zone = ZoneId.systemDefault()
-    val time = Instant.ofEpochSecond(event.timesort).atZone(zone).format(DateTimeFormatter.ofPattern("HH:mm"))
-    val now = Instant.now().epochSecond
-    val isUrgent = event.timesort - now < 24 * 3600
-    val remaining = remainingLabel(now, event.timesort)
-    val accent = if (isUrgent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-    val (icon, kindLabel) = when (event.modulename) {
-        "assign" -> Icons.AutoMirrored.Filled.Assignment to "課題"
-        "quiz" -> Icons.Filled.Quiz to "小テスト"
-        else -> Icons.Filled.Event to (event.modulename ?: "予定")
-    }
-
-    AppCard(onClick = onClick) {
-        Row(
-            modifier = Modifier.height(IntrinsicSize.Min),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // 左端のアクセントバー: 24時間以内は赤で視線を引く
-            Box(
-                Modifier
-                    .width(5.dp)
-                    .fillMaxHeight()
-                    .background(accent),
-            )
-            Column(
-                Modifier
-                    .width(64.dp)
-                    .padding(vertical = 14.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    time,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = accent,
-                )
-                MetaText(kindLabel)
-            }
-            Column(
-                Modifier
-                    .weight(1f)
-                    .padding(top = 12.dp, bottom = 12.dp, end = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                Text(
-                    event.activityname ?: event.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                event.course?.let { MetaText(it.fullname) }
-                if (remaining != null) {
-                    StatusPill(
-                        remaining,
-                        containerColor = if (isUrgent) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = if (isUrgent) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(top = 3.dp),
-                    )
-                }
-            }
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.outlineVariant,
-                modifier = Modifier.padding(end = 14.dp).size(22.dp),
-            )
-        }
-    }
+private fun ActionEvent.kindIcon(): ImageVector = when (modulename) {
+    "assign" -> Icons.AutoMirrored.Outlined.Assignment
+    "quiz" -> Icons.Outlined.Quiz
+    "forum" -> Icons.Outlined.Forum
+    else -> Icons.Outlined.Event
 }

@@ -1,29 +1,41 @@
 package dev.rits.bettermoodle.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.data.SyllabusRecord
@@ -31,20 +43,6 @@ import dev.rits.bettermoodle.data.SyllabusRepository
 import dev.rits.bettermoodle.data.SyllabusResolveResult
 import dev.rits.bettermoodle.data.SyllabusSearchResult
 import kotlinx.coroutines.launch
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.MenuBook
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
-import androidx.compose.material.icons.outlined.School
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.SearchOff
-import androidx.compose.material3.Icon
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
 
 /**
  * シラバス画面。
@@ -74,12 +72,15 @@ fun SyllabusScreen(container: AppContainer) {
                 is SyllabusResolveResult.Found -> openInCustomTab(context, result.url)
                 SyllabusResolveResult.NotFound -> errorMessage = "授業コード $code のシラバスが見つかりませんでした"
                 // 通信失敗・仕様変更は「見つからない」と区別し、検索サイトへの導線を残す
-                else -> errorMessage = "${result.failureMessage} (授業コード $code)。再試行するか「検索サイトを開く」から探してください"
+                else -> errorMessage = "${result.failureMessage} (授業コード $code)。もう一度試すか、「シラバス検索サイトで詳しく探す」から探してください"
             }
         }
     }
 
     fun runSearch() {
+        // 検索ボタンがなくキーボードの検索キーで何度でも呼べるので、実行中は受け付けない
+        // (後から返った古い応答で結果を上書きしない)
+        if (searching || resolvingCode != null) return
         val q = query.trim()
         if (q.isEmpty()) {
             results = null
@@ -108,150 +109,156 @@ fun SyllabusScreen(container: AppContainer) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                placeholder = { Text("授業コード / キーワード", maxLines = 1) },
-                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                shape = MaterialTheme.shapes.large,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { runSearch() }),
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = ::runSearch, enabled = !searching && resolvingCode == null) {
-                Text(if (searching) "検索中…" else "検索")
-            }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { openInCustomTab(context, SyllabusRepository.SYLLABUS_SEARCH_URL) }) {
-                Text("検索サイトを開く ↗")
-            }
-            if (results != null) {
-                TextButton(onClick = { results = null; query = "" }) {
-                    Text("履修コース一覧に戻る")
+    val currentResults = results
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // 検索欄が主操作。検索ボタンは置かず、キーボードの検索キーで実行する
+        TextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text("授業コード(5桁)か科目名・教員名", maxLines = 1) },
+            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+            trailingIcon = {
+                when {
+                    searching || resolvingCode != null ->
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    query.isNotEmpty() -> IconButton(onClick = { query = ""; results = null; errorMessage = null }) {
+                        Icon(Icons.Filled.Close, contentDescription = "検索をやめる")
+                    }
                 }
-            }
-        }
+            },
+            singleLine = true,
+            shape = MaterialTheme.shapes.large,
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+            ),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { runSearch() }),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = ScreenGutter, vertical = 8.dp),
+        )
         errorMessage?.let {
-            MessageBanner(it, isError = true, onDismiss = { errorMessage = null })
-            Spacer(Modifier.height(8.dp))
+            Column(Modifier.padding(horizontal = ScreenGutter, vertical = 4.dp)) {
+                MessageBanner(it, isError = true, onDismiss = { errorMessage = null })
+                // 一覧の末尾のリンクは履修コースの読み込み中・失敗時には出ないので、失敗の案内のすぐ下にも置く
+                SyllabusSiteLink(context)
+            }
         }
 
-        val currentResults = results
         when {
             searching -> LoadingBox()
 
-            // キーワード検索の結果表示
+            // キーワード検索の結果
             currentResults != null -> {
                 if (currentResults.isEmpty()) {
-                    EmptyBox("該当するシラバスが見つかりませんでした", icon = Icons.Outlined.SearchOff)
+                    EmptyBox(
+                        "該当するシラバスはありません",
+                        "別のキーワードか、授業コード5桁で探してください。",
+                        onRetry = { openInCustomTab(context, SyllabusRepository.SYLLABUS_SEARCH_URL) },
+                        retryLabel = "シラバス検索サイトで探す",
+                    )
                 } else {
-                    SectionHeading("検索結果", modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)) {
-                        MetaText("${currentResults.size}件")
-                    }
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(ListItemSpacing)) {
+                    LazyColumn(contentPadding = RowListPadding) {
+                        item(key = "results-header") { SectionLabel("検索結果 ${currentResults.size}件") }
                         items(currentResults, key = { it.id }) { record ->
-                            SyllabusResultCard(record) {
+                            SyllabusResultRow(record) {
                                 val url = container.syllabusRepository.detailUrl(record)
                                 if (url != null) openInCustomTab(context, url)
                             }
+                            RowDivider()
                         }
+                        item(key = "site") { SyllabusSiteLink(context) }
                     }
                 }
             }
 
-            // 通常時: 履修中コース一覧
+            // 通常時: 履修中の授業から1タップでシラバスへ
             else -> Column {
-            StaleDataBanner(state, onRetry = refresh)
-            when (val s = state) {
-                is UiState.Loading -> LoadingBox()
-                is UiState.Error -> ErrorBox(s.message, onRetry = refresh)
-                is UiState.Success -> {
-                    val withCodes = s.data.filter { it.courseCode != null }
-                    if (withCodes.isEmpty()) {
-                        EmptyBox("授業コード付きの履修コースが見つかりません", onRetry = refresh, icon = Icons.Outlined.School)
-                    } else {
-                        SectionHeading("履修中のコース", modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)) {
-                            MetaText("タップでシラバスを開く")
-                        }
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(ListItemSpacing)) {
-                            items(withCodes, key = { it.id }) { course ->
-                                AppCard(
-                                    onClick = { course.courseCode?.let(::openByCode) },
-                                    enabled = resolvingCode == null,
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                StaleDataBanner(state, onRetry = refresh)
+                when (val s = state) {
+                    is UiState.Loading -> LoadingBox()
+                    is UiState.Error -> ErrorBox(
+                        "${s.message}。履修中の授業の一覧を表示できません。上の欄から検索はできます。",
+                        onRetry = refresh,
+                        title = "履修中の授業を読み込めませんでした",
+                    )
+                    is UiState.Success -> {
+                        val withCodes = s.data.filter { it.courseCode != null }
+                        LazyColumn(contentPadding = RowListPadding) {
+                            if (withCodes.isNotEmpty()) {
+                                item(key = "courses-header") {
+                                    SectionLabel("履修中の授業") { MetaText("ブラウザで開きます") }
+                                }
+                                items(withCodes, key = { it.id }) { course ->
+                                    ListRow(
+                                        onClick = { course.courseCode?.let(::openByCode) },
+                                        enabled = resolvingCode == null,
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        LeadingIconBox(Icons.AutoMirrored.Outlined.MenuBook, contentDescription = null)
-                                        Spacer(Modifier.width(14.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text(
-                                                course.displayName,
-                                                style = MaterialTheme.typography.titleMedium,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            MetaText("授業コード ${course.courseCode}", modifier = Modifier.padding(top = 2.dp))
-                                        }
+                                        Text(
+                                            course.displayName,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Spacer(Modifier.width(12.dp))
                                         if (resolvingCode == course.courseCode) {
-                                            CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                                         } else {
-                                            Icon(
-                                                Icons.AutoMirrored.Outlined.OpenInNew,
-                                                contentDescription = "シラバスを開く",
-                                                tint = MaterialTheme.colorScheme.outline,
-                                            )
+                                            MetaText(course.courseCode.orEmpty())
                                         }
                                     }
+                                    RowDivider()
                                 }
                             }
+                            item(key = "site") { SyllabusSiteLink(context) }
                         }
                     }
                 }
-            }
             }
         }
     }
 }
 
+/** 一覧の末尾に置く外部検索サイトへの導線 (まれにしか使わないので上部に常設しない) */
 @Composable
-private fun SyllabusResultCard(record: SyllabusRecord, onOpen: () -> Unit) {
-    AppCard(onClick = onOpen) {
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    record.courseName,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                // 教員名は本文の色で、開講情報はさらに薄い色で段階を付ける
-                record.teacher?.takeIf { it.isNotBlank() }?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall)
-                }
-                val details = listOfNotNull(
-                    record.weekDayPeriod,
-                    record.campus,
-                    record.term,
-                    record.credits?.let { "${it}単位" },
-                ).joinToString(" · ")
-                if (details.isNotBlank()) MetaText(details, maxLines = 2)
-            }
-            Icon(
-                Icons.AutoMirrored.Outlined.OpenInNew,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.outline,
-                modifier = Modifier.padding(start = 8.dp),
+private fun SyllabusSiteLink(context: android.content.Context) {
+    TextButton(
+        onClick = { openInCustomTab(context, SyllabusRepository.SYLLABUS_SEARCH_URL) },
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp),
+    ) {
+        Text("シラバス検索サイトで詳しく探す")
+        Spacer(Modifier.width(4.dp))
+        Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+    }
+}
+
+/** 検索結果の1行: 科目名 / 教員 / 曜日時限・キャンパス・学期・単位 */
+@Composable
+private fun SyllabusResultRow(record: SyllabusRecord, onOpen: () -> Unit) {
+    ListRow(onClick = onOpen) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                record.courseName,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
+            record.teacher?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            val details = listOfNotNull(
+                record.weekDayPeriod,
+                record.campus,
+                record.term,
+                record.credits?.let { "${it}単位" },
+            ).joinToString(" · ")
+            if (details.isNotBlank()) MetaText(details, maxLines = 2)
         }
     }
 }

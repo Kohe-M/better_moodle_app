@@ -14,6 +14,8 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import dev.rits.bettermoodle.data.AuthSession
 import dev.rits.bettermoodle.data.AuthState
+import dev.rits.bettermoodle.data.CourseColorStore
+import dev.rits.bettermoodle.data.DeadlineDoneStore
 import dev.rits.bettermoodle.data.FileDraftStore
 import dev.rits.bettermoodle.data.MoodleClient
 import dev.rits.bettermoodle.data.MoodleRepository
@@ -120,6 +122,15 @@ class AppContainer(private val app: Application) {
         currentToken = { authSession.currentToken() },
     )
 
+    /** 授業カラー (利用者の選択と時間割からの自動割り当て) */
+    val courseColorStore = CourseColorStore(app)
+
+    /** 締切の「アプリ内で完了扱い」 */
+    val deadlineDoneStore = DeadlineDoneStore(app)
+
+    /** 課題タブのバッジ: 24時間以内の未完了の締切の件数。締切を読み込んだ画面が更新する */
+    val deadlineBadge = MutableStateFlow(0)
+
     init {
         authSession.start()
     }
@@ -167,6 +178,8 @@ class AppContainer(private val app: Application) {
 
     private suspend fun clearSessionArtifacts() {
         LoadableMemoryCache.clear()
+        deadlineDoneStore.clear()
+        deadlineBadge.value = 0
         pendingDeepLink.value = null
         notificationReadSync.clear()
         moodleRepository.resetAutologinThrottle()
