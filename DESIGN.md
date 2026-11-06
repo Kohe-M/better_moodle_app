@@ -2,8 +2,8 @@
 Design · MD
 ---
 name: Campus — University Timetable & Moodle Client
-version: 1.1.0
-updated: 2026-10-12
+version: 1.1.1
+updated: 2026-11-06
 platforms: [ios, android, web]
 colors:
   # ---- Light ----
@@ -145,6 +145,12 @@ components:
     typography: "{typography.caption}"
     rounded: "{rounded.xs}"
     padding: 2px 8px
+  chip-status-tone:            # 色調つきの札 (期限切れ・24時間以内の締切、未読件数など)
+    backgroundColor: "{colors.*-soft}"
+    typography: "{typography.label}"
+    numeric: tabular-nums
+    rounded: "{rounded.xs}"
+    padding: 4px 8px
 ---
  
 # Campus DESIGN.md
@@ -216,6 +222,7 @@ components:
 - 自動割り当て：コースIDのハッシュ mod 10。隣接コマ（同曜日の連続時限・同時限の隣曜日）で同色が並ぶ場合は次の色にずらす。
 - ユーザーが変更可能。ただしパレット外の任意色（カラーピッカー）は提供しない（コントラスト保証が崩れるため）。
 - 授業カラーを UI クローム（タブバー、ボタン）に使わない。授業に属する要素にだけ使う。
+- 終わった授業は半透明にせず、`surface-sunken` の面と `ink-secondary` の文字で控えめにする。
 ### ダーク
 - 純黒 `#000` は使わない（`canvas-dark #111113`）。OLEDでのスミアとコントラスト過多を避ける。
 - ダークでは面の明度差で階層を作る：canvas-dark < surface-sunken-dark < surface-dark。
@@ -242,7 +249,7 @@ Tide Guide 由来。「今日」画面の最上部背景だけ、朝・昼・夕
 |---|---|
 | 時間割セル | 最大3行、末尾省略。ユーザー設定の「略称」があれば優先 |
 | Now Card | 2行まで、末尾省略 |
-| リスト行 | 1行、末尾省略。詳細画面で全文 |
+| リスト行 | 2行まで、末尾省略。詳細画面で全文 |
 | 画面タイトル | 大タイトル時2行まで、スクロール後のインラインタイトルは1行省略 |
  
 ---
@@ -314,7 +321,7 @@ Tide Guide 由来。「今日」画面の最上部背景だけ、朝・昼・夕
 - 学期切替は画面上部のセグメント（春/秋、Q1–Q4）。
 ### 8.3 課題（締切）リスト
 - セクション見出し：「期限切れ」「今日」「明日」「今週」「来週以降」。Moodle 5.0 と同じく相対表現（今日/明日）を使い、7日以上先は `10/14(火)` 形式。
-- 行構成（左→右）：完了チェック（44pt領域）｜授業カラーの 8px ドット＋授業略称 `caption`｜課題名 `body-sm` 1行｜右端に締切 `caption tabular`。
+- 行構成（左→右）：完了チェック（44pt領域）｜授業カラーの 8px ドット＋授業略称 `caption`｜課題名 `body-sm` の 600（完了扱いは 400）、2行まで｜右端に締切 `caption tabular`（期限切れ・24時間以内は `chip-status-tone`）。
 - 締切の色：期限切れ `danger`、24時間以内 `warning`、それ以外 `ink-secondary`。**必ず「あと3時間」「2日前に期限切れ」などの文字と併用**。
 - 提出済みはセクション末尾の折りたたみ「提出済み（4）」へ移動。
 - スワイプ：右→「完了にする（アプリ内のみ）」、左→「リマインダー」。Moodle 上の提出と、アプリ内の「完了扱い」を**視覚的に区別**する（提出済み＝success の✓、手動完了＝ink-secondary の✓）。

@@ -33,7 +33,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.contentDescription
@@ -469,13 +468,12 @@ private fun TimelineRow(block: DayBlock, time: LocalTime, onClick: (() -> Unit)?
             )
             Text(block.end.format(ClockFormat), style = MaterialTheme.typography.labelMedium, color = c.inkSecondary)
         }
+        // 終わった授業は半透明にせず、無彩色の面で控えめにする (DESIGN.md §3)
         CourseSquare(
-            cc,
+            if (past) CourseColor(c.surfaceSunken, c.inkSecondary) else cc,
             block.entry.title,
             size = 36.dp,
-            modifier = Modifier
-                .padding(horizontal = Spacing.sm)
-                .alpha(if (past) 0.45f else 1f),
+            modifier = Modifier.padding(horizontal = Spacing.sm),
         )
         Column(Modifier.weight(1f)) {
             Text(

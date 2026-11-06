@@ -72,6 +72,7 @@ import dev.rits.bettermoodle.ui.theme.AppTheme
 import dev.rits.bettermoodle.ui.theme.Radius
 import dev.rits.bettermoodle.ui.theme.Sizes
 import dev.rits.bettermoodle.ui.theme.Spacing
+import dev.rits.bettermoodle.ui.theme.TABULAR_NUMS
 
 sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
@@ -304,7 +305,12 @@ fun StatusPill(
             Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(Spacing.xs))
         }
-        Text(text, style = MaterialTheme.typography.labelLarge, color = content, maxLines = 1)
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = TABULAR_NUMS),
+            color = content,
+            maxLines = 1,
+        )
     }
 }
 
@@ -736,7 +742,12 @@ fun HeroPill(text: String, color: Color = AppTheme.colors.ink, icon: ImageVector
             Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(Spacing.xs))
         }
-        Text(text, style = MaterialTheme.typography.labelLarge, color = color, maxLines = 1)
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = TABULAR_NUMS),
+            color = color,
+            maxLines = 1,
+        )
     }
 }
 
