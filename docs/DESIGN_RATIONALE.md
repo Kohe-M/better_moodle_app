@@ -15,6 +15,8 @@
 | §8.2 時間割グリッド | `ui/TimetableScreen.kt` (曜日ごとの列で連続時限を結合、600dp 以上は2ペイン、840dp 以上は今日の締切、フォント倍率 1.6 以上はリスト) |
 | §8.3 課題リスト | `ui/DeadlinesScreen.kt` (セクション・完了チェック・右スワイプで完了・完了の折りたたみ・コース別フィルタ) |
 | §8.4 コース一覧・詳細 | `ui/CourseListScreen.kt` (`CoursesScreen`)、`ui/CourseScreen.kt` (現在週のセクションを自動展開: `currentSectionIndex`) |
+| §8.4.1 詳細画面 | `ui/Common.kt` の `DetailTitle`・`StatusHeroCard`・`DetailCard`・`InfoRow`。課題・小テスト・フォーラム・ページの各画面で使う |
+| components.grouped-list | `ui/Common.kt` の `Modifier.groupedItem` と `GroupPosition` |
 | §8.5 同期・オフライン | `StaleDataBanner` (オフライン/更新失敗を出し分け)、`SyncFooter` |
 | §8.7 ボタン | `PrimaryButton` / `SecondaryButton` / `TertiaryButton` / `ConfirmSheet` |
 | §10 文言 | `ui/Formats.kt` (`9/28(月)`・`13:00`・`明日 23:59`・`2日前に期限切れ`) |

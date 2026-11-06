@@ -43,11 +43,15 @@ data class CampusColors(
     val danger: Color,
     val warning: Color,
     val success: Color,
+    /** 状態色の面 (バナー・状態カード・札)。文字は対応する状態色を載せる */
+    val dangerSoft: Color,
+    val warningSoft: Color,
+    val successSoft: Color,
     val isDark: Boolean,
 )
 
 private val LightCampus = CampusColors(
-    canvas = Color(0xFFF7F6F3),
+    canvas = Color(0xFFF2F1EE),
     surface = Color(0xFFFFFFFF),
     surfaceSunken = Color(0xFFEFEEEA),
     hairline = Color(0xFFE4E2DD),
@@ -60,12 +64,15 @@ private val LightCampus = CampusColors(
     danger = Color(0xFFC8372D),
     warning = Color(0xFFA15C00),
     success = Color(0xFF1D7A4F),
+    dangerSoft = Color(0xFFFDF1EF),
+    warningSoft = Color(0xFFFCF0DC),
+    successSoft = Color(0xFFE2F3EA),
     isDark = false,
 )
 
 private val DarkCampus = CampusColors(
-    canvas = Color(0xFF111113),
-    surface = Color(0xFF1A1A1D),
+    canvas = Color(0xFF0E0E10),
+    surface = Color(0xFF1C1C1F),
     surfaceSunken = Color(0xFF141416),
     hairline = Color(0xFF2A2A2F),
     ink = Color(0xFFEDEDF0),
@@ -77,10 +84,13 @@ private val DarkCampus = CampusColors(
     danger = Color(0xFFFF8A7F),
     warning = Color(0xFFF2B24C),
     success = Color(0xFF5CCB94),
+    dangerSoft = Color(0xFF3A1E1C),
+    warningSoft = Color(0xFF33270F),
+    successSoft = Color(0xFF15291F),
     isDark = true,
 )
 
-/** 授業カラー1色。bg (面) と fg (文字・アクセントバー) は必ずペアで使う。 */
+/** 授業カラー1色。bg (面) と fg (文字・アイコン) は必ずペアで使う。 */
 @Immutable
 data class CourseColor(val bg: Color, val fg: Color)
 

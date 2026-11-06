@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
@@ -120,8 +121,18 @@ fun CoursesScreen(
                 }
 
                 item(key = "links-h") { SectionLabel("大学のサービス") }
-                item(key = "syllabus") { LinkRow(Icons.AutoMirrored.Outlined.MenuBook, "シラバス", "授業コード・キーワードで検索", onOpenSyllabus) }
-                item(key = "portal") { LinkRow(Icons.Outlined.Public, "スチューデントポータル", "大学からのお知らせ・各種手続き", onOpenPortal) }
+                item(key = "syllabus") {
+                    LinkRow(
+                        Icons.AutoMirrored.Outlined.MenuBook, "シラバス", "授業コード・キーワードで検索", onOpenSyllabus,
+                        modifier = Modifier.groupedItem(GroupPosition.First),
+                    )
+                }
+                item(key = "portal") {
+                    LinkRow(
+                        Icons.Outlined.Public, "スチューデントポータル", "大学からのお知らせ・各種手続き", onOpenPortal,
+                        modifier = Modifier.groupedItem(GroupPosition.Last, dividerInset = LinkTextInset),
+                    )
+                }
                 item(key = "sync") { SyncFooter(state) }
             }
         }
@@ -139,8 +150,10 @@ private fun LazyListScope.courseItems(
     courses: List<Course>,
     onOpenCourse: (Long, String, String?) -> Unit,
 ) {
-    items(courses, key = { "$prefix-${it.id}" }) { course ->
-        CourseRow(course) { onOpenCourse(course.id, course.displayName.ifBlank { course.fullname }, course.courseCode) }
+    itemsIndexed(courses, key = { _, it -> "$prefix-${it.id}" }) { index, course ->
+        CourseRow(course, Modifier.groupedItem(GroupPosition.of(index, courses.size), dividerInset = CourseTextInset)) {
+            onOpenCourse(course.id, course.displayName.ifBlank { course.fullname }, course.courseCode)
+        }
     }
 }
 
@@ -170,8 +183,10 @@ private fun OtherCourses(
                 if (courses.isEmpty()) {
                     MetaText("${label}はありません", modifier = Modifier.padding(horizontal = ScreenGutter, vertical = Spacing.sm))
                 }
-                courses.forEach { course ->
-                    CourseRow(course) { onOpenCourse(course.id, course.displayName.ifBlank { course.fullname }, course.courseCode) }
+                courses.forEachIndexed { index, course ->
+                    CourseRow(course, Modifier.groupedItem(GroupPosition.of(index, courses.size), dividerInset = CourseTextInset)) {
+                        onOpenCourse(course.id, course.displayName.ifBlank { course.fullname }, course.courseCode)
+                    }
                 }
             }
         }
@@ -213,7 +228,7 @@ internal fun CollapsibleHeader(text: String, expanded: Boolean, onToggle: () -> 
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onToggle)
-            .padding(start = ScreenGutter, end = ScreenGutter, top = Spacing.xl, bottom = Spacing.sm)
+            .padding(start = ScreenGutter + Spacing.xs, end = ScreenGutter, top = Spacing.xl, bottom = Spacing.sm)
             .semantics { stateDescription = if (expanded) "展開" else "折りたたみ" },
     ) {
         Text(text, style = MaterialTheme.typography.labelLarge, color = AppTheme.colors.inkSecondary, modifier = Modifier.weight(1f))
@@ -225,41 +240,52 @@ internal fun CollapsibleHeader(text: String, expanded: Boolean, onToggle: () -> 
     }
 }
 
-/** コースの1行: 授業カラーの角丸スクエア + 名前 (1行・末尾省略) + 授業コード */
+/** コース行の本文の開始位置 (授業カラーのスクエアの分)。区切り線もここから引く */
+private val CourseTextInset = ScreenGutter + 36.dp + Spacing.md
+
+/** サービスへのリンク行の本文の開始位置 */
+private val LinkTextInset = ScreenGutter + 36.dp + Spacing.md
+
+/** コースの1行: 授業カラーの角丸スクエア + 名前 (2行まで) + 授業コード + 進む印 */
 @Composable
-private fun CourseRow(course: Course, onClick: () -> Unit) {
+private fun CourseRow(course: Course, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val name = course.displayName.ifBlank { course.fullname }
     val code = course.courseCode ?: course.shortname.ifBlank { null }
     val cc = courseColor(CourseColors.key(course))
     ListRow(
         onClick = onClick,
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = listOfNotNull(name, code).joinToString("、") },
+        modifier = modifier.semantics(mergeDescendants = true) { contentDescription = listOfNotNull(name, code).joinToString("、") },
     ) {
-        CourseSquare(cc, name)
+        CourseSquare(cc, name, size = 36.dp)
         Spacer(Modifier.width(Spacing.md))
-        Text(
-            text = name,
-            style = MaterialTheme.typography.bodyLarge,
-            color = AppTheme.colors.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        if (code != null) {
-            Spacer(Modifier.width(Spacing.md))
-            MetaText(code)
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.titleSmall,
+                color = AppTheme.colors.ink,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (code != null) MetaText(code)
         }
+        Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = AppTheme.colors.inkTertiary)
     }
 }
 
 @Composable
-internal fun LinkRow(icon: ImageVector, title: String, subtitle: String?, onClick: () -> Unit) {
-    ListRow(onClick = onClick, verticalAlignment = Alignment.CenterVertically) {
-        LeadingIcon(icon, contentDescription = null, modifier = Modifier.padding(horizontal = Spacing.xxs))
+internal fun LinkRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    ListRow(onClick = onClick, verticalAlignment = Alignment.CenterVertically, modifier = modifier) {
+        IconTile(icon, tone = Tone.Accent, size = 36.dp, iconSize = 20.dp)
         Spacer(Modifier.width(Spacing.md))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, color = AppTheme.colors.ink)
+            Text(title, style = MaterialTheme.typography.titleSmall, color = AppTheme.colors.ink)
             subtitle?.let { MetaText(it) }
         }
         Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = AppTheme.colors.inkTertiary)

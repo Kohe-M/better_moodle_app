@@ -1,5 +1,9 @@
 package dev.rits.bettermoodle.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.automirrored.outlined.Article
+import dev.rits.bettermoodle.ui.theme.AppTheme
+import dev.rits.bettermoodle.ui.theme.Spacing
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
@@ -194,31 +198,46 @@ private fun PageContentBody(
 ) {
     val introBlocks = remember(page.intro) { splitHtmlToBlocks(page.intro) }
     val blocks = remember(page.content) { splitHtmlToBlocks(page.content) }
+    // 本文は1枚のカードにまとめる (ブロックごとの item だが角丸・面は位置で繋げる)
+    val all = introBlocks.map { "intro" to it } + blocks.map { "content" to it }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(top = Spacing.lg, bottom = Spacing.xxl),
     ) {
         item(key = "page-name") {
-            Text(page.name, style = MaterialTheme.typography.headlineSmall)
+            DetailTitle(
+                page.name,
+                typeLabel = "ページ",
+                typeIcon = Icons.AutoMirrored.Outlined.Article,
+                modifier = Modifier.padding(start = ScreenGutter, end = ScreenGutter, bottom = Spacing.lg),
+            )
         }
-        introBlocks.forEachIndexed { index, block ->
-            item(key = "intro-$index") {
-                PageBlockItem(container, block, onOpenLink)
+        val introCount = introBlocks.size
+        all.forEachIndexed { index, (kind, block) ->
+            val position = GroupPosition.of(index, all.size)
+            item(key = "$kind-${if (kind == "intro") index else index - introCount}") {
+                Box(
+                    Modifier
+                        .groupedItem(position, dividerInset = null)
+                        .padding(
+                            start = Spacing.lg,
+                            end = Spacing.lg,
+                            top = if (position.isFirst) Spacing.lg else Spacing.xs,
+                            bottom = if (position.isLast) Spacing.lg else Spacing.xs,
+                        ),
+                ) {
+                    PageBlockItem(container, block, onOpenLink)
+                }
             }
         }
-        blocks.forEachIndexed { index, block ->
-            item(key = "content-$index") {
-                PageBlockItem(container, block, onOpenLink)
-            }
-        }
-        if (introBlocks.isEmpty() && blocks.isEmpty()) {
+        if (all.isEmpty()) {
             item(key = "empty") {
                 Text(
                     "このページには表示できる内容がありません。",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = ScreenGutter),
                 )
             }
         }
@@ -235,7 +254,8 @@ private fun PageBlockItem(
         is PageBlock.Html -> HtmlText(
             html = block.html,
             onOpenUrl = onOpenLink,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyLarge,
+            color = AppTheme.colors.ink,
         )
         is PageBlock.Image -> PageInlineImage(container, block.src)
     }

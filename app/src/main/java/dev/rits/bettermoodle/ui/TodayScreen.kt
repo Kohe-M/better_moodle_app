@@ -5,10 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,7 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -35,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.contentDescription
@@ -59,6 +58,7 @@ import dev.rits.bettermoodle.ui.theme.AppTheme
 import dev.rits.bettermoodle.ui.theme.CourseColor
 import dev.rits.bettermoodle.ui.theme.Radius
 import dev.rits.bettermoodle.ui.theme.Spacing
+import dev.rits.bettermoodle.ui.theme.TABULAR_NUMS
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -140,22 +140,36 @@ fun TodayScreen(
                     } else {
                         val time = now.toLocalTime()
                         val nowIndex = blocks.indexOfFirst { time < it.end }.let { if (it < 0) blocks.size else it }
-                        blocks.forEachIndexed { index, block ->
-                            if (index == nowIndex && time < block.start) {
-                                item(key = "tl-now") { NowMarker(time) }
+                        // 授業と現在時刻ラインを1枚のカードにまとめる (null = 現在時刻ライン)
+                        val rows: List<IndexedValue<DayBlock>?> = buildList {
+                            blocks.withIndex().forEach { indexed ->
+                                if (indexed.index == nowIndex && time < indexed.value.start) add(null)
+                                add(indexed)
                             }
-                            // 同じコマに複数の授業があると時限が重なるので、並び順で区別する
-                            item(key = "tl-$index-${block.firstPeriod}") {
-                                TimelineRow(
-                                    block = block,
-                                    time = time,
-                                    onClick = block.entry.courseId?.let { id ->
-                                        { onOpenCourse(id, block.entry.title, block.entry.courseCode) }
-                                    },
-                                )
+                            if (nowIndex == blocks.size) add(null)
+                        }
+                        rows.forEachIndexed { rowIndex, row ->
+                            val position = GroupPosition.of(rowIndex, rows.size)
+                            if (row == null) {
+                                item(key = "tl-now") { NowMarker(time, Modifier.groupedItem(position, dividerInset = null)) }
+                            } else {
+                                val (index, block) = row
+                                // 同じコマに複数の授業があると時限が重なるので、並び順で区別する
+                                item(key = "tl-$index-${block.firstPeriod}") {
+                                    TimelineRow(
+                                        block = block,
+                                        time = time,
+                                        onClick = block.entry.courseId?.let { id ->
+                                            { onOpenCourse(id, block.entry.title, block.entry.courseCode) }
+                                        },
+                                        modifier = Modifier.groupedItem(
+                                            position,
+                                            dividerInset = if (rows.getOrNull(rowIndex - 1) == null) null else ScreenGutter + 44.dp,
+                                        ),
+                                    )
+                                }
                             }
                         }
-                        if (nowIndex == blocks.size) item(key = "tl-now") { NowMarker(time) }
                     }
                 }
 
@@ -196,14 +210,17 @@ fun TodayScreen(
                                 )
                             }
                         }
-                        items(soon.take(TODAY_DEADLINE_LIMIT), key = { "dl-${it.id}" }) { event ->
+                        val shown = soon.take(TODAY_DEADLINE_LIMIT)
+                        itemsIndexed(shown, key = { _, it -> "dl-${it.id}" }) { index, event ->
                             DeadlineRow(
                                 event = event,
                                 nowSec = nowSec,
                                 done = false,
                                 onToggleDone = { container.deadlineDoneStore.setDone(DeadlineDoneStore.keyOf(event), it) },
                                 onClick = { onOpenDeadline(event) },
-                                modifier = Modifier.animateItem(),
+                                modifier = Modifier
+                                    .animateItem()
+                                    .groupedItem(GroupPosition.of(index, shown.size), dividerInset = DeadlineTextInset),
                             )
                         }
                         if (soon.size > TODAY_DEADLINE_LIMIT) {
@@ -227,7 +244,7 @@ fun TodayScreen(
 }
 
 /**
- * Now Card (DESIGN.md §8.1)。左端 4px のバーに授業カラー fg。
+ * Now Card (DESIGN.md §8.1)。カード全体を授業カラーの面にし、教室を授業カラー fg で強調する。
  * 重要情報は色より先にサイズで強調する: 残り時間 = countdown、教室 = title-md、授業名 = body。
  */
 @Composable
@@ -240,7 +257,7 @@ private fun NowCard(state: NowCardState, onOpenCourse: (Long, String, String?) -
     }
     val cc = entry?.let { courseColor(it.courseCode, it.courseId, it.title) }
     val onClick = entry?.courseId?.let { id -> { onOpenCourse(id, entry.title, entry.courseCode) } }
-    NowCardFrame(accent = cc, onClick = onClick) {
+    NowCardFrame(course = cc, onClick = onClick) {
         when (state) {
             is NowCardState.InClass -> {
                 CardLabel("授業中 · ${periodLabel(state.entry, state.start, state.end)}")
@@ -249,7 +266,7 @@ private fun NowCard(state: NowCardState, onOpenCourse: (Long, String, String?) -
                 LinearProgressIndicator(
                     progress = { state.progress },
                     color = cc!!.fg,
-                    trackColor = c.surfaceSunken,
+                    trackColor = c.surface,
                     drawStopIndicator = {},
                     gapSize = 0.dp,
                     modifier = Modifier.fillMaxWidth().height(4.dp),
@@ -261,7 +278,7 @@ private fun NowCard(state: NowCardState, onOpenCourse: (Long, String, String?) -
                     CardLabel("次の授業 · ${periodLabel(state.entry, state.start, state.end)}", Modifier.weight(1f, fill = false))
                     state.freeMinutes?.let {
                         Spacer(Modifier.width(Spacing.sm))
-                        StatusPill("空きコマ ${durationLabel(it)}")
+                        StatusPill("空きコマ ${durationLabel(it)}", containerColor = c.surface)
                     }
                 }
                 Countdown("あと", state.minutesUntil)
@@ -290,28 +307,21 @@ private fun NowCard(state: NowCardState, onOpenCourse: (Long, String, String?) -
     }
 }
 
+/** 授業があるときはカード全体を授業カラーの面 (bg) にする。授業がなければ surface + hairline */
 @Composable
-private fun NowCardFrame(accent: CourseColor?, onClick: (() -> Unit)?, content: @Composable () -> Unit) {
+private fun NowCardFrame(course: CourseColor?, onClick: (() -> Unit)?, content: @Composable () -> Unit) {
     val c = AppTheme.colors
     AppCard(
         onClick = onClick,
         shape = RoundedCornerShape(Radius.lg),
-        border = BorderStroke(0.5.dp, c.hairline),
+        containerColor = course?.bg ?: c.surface,
+        border = if (course != null) null else BorderStroke(0.5.dp, c.hairline),
     ) {
-        Row(Modifier.height(IntrinsicSize.Min)) {
-            Box(
-                Modifier
-                    .width(4.dp)
-                    .fillMaxHeight()
-                    .background(accent?.fg ?: c.hairline),
-            )
-            Column(
-                Modifier
-                    .weight(1f)
-                    .padding(Spacing.lg)
-                    .semantics(mergeDescendants = true) {},
-            ) { content() }
-        }
+        Column(
+            Modifier
+                .padding(Spacing.lg)
+                .semantics(mergeDescendants = true) {},
+        ) { content() }
     }
 }
 
@@ -392,7 +402,7 @@ private fun nextDayLabel(next: TimetableFocus.Upcoming): String = when (next.day
 
 @Composable
 private fun NowCardMessage(title: String, body: String, action: Pair<String, () -> Unit>? = null) {
-    NowCardFrame(accent = null, onClick = null) {
+    NowCardFrame(course = null, onClick = null) {
         Text(title, style = MaterialTheme.typography.titleMedium, color = AppTheme.colors.ink)
         Spacer(Modifier.height(Spacing.xs))
         Text(body, style = MaterialTheme.typography.bodyMedium, color = AppTheme.colors.inkSecondary)
@@ -402,7 +412,7 @@ private fun NowCardMessage(title: String, body: String, action: Pair<String, () 
 
 @Composable
 private fun NowCardSkeleton() {
-    NowCardFrame(accent = null, onClick = null) {
+    NowCardFrame(course = null, onClick = null) {
         SkeletonBlock(width = 96.dp, height = 13.dp)
         Spacer(Modifier.height(Spacing.md))
         SkeletonBlock(width = 160.dp, height = 34.dp)
@@ -412,11 +422,11 @@ private fun NowCardSkeleton() {
 }
 
 /**
- * タイムラインの1行 (Structured 風)。左に開始・終了時刻、授業カラーの縦バー、授業名と教室。
+ * タイムラインの1行。左に開始・終了時刻、授業カラーの角丸スクエア、授業名と教室。
  * 授業中の行には現在時刻の位置に accent の線を引く (1分ごとに位置更新、アニメーションなし)。
  */
 @Composable
-private fun TimelineRow(block: DayBlock, time: LocalTime, onClick: (() -> Unit)?) {
+private fun TimelineRow(block: DayBlock, time: LocalTime, onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
     val c = AppTheme.colors
     val cc = courseColor(block.entry.courseCode, block.entry.courseId, block.entry.title)
     val inClass = time >= block.start && time < block.end
@@ -431,8 +441,8 @@ private fun TimelineRow(block: DayBlock, time: LocalTime, onClick: (() -> Unit)?
     val periods = if (block.lastPeriod > block.firstPeriod) "${block.firstPeriod}–${block.lastPeriod}限" else "${block.firstPeriod}限"
     ListRow(
         onClick = onClick,
-        verticalAlignment = Alignment.Top,
-        modifier = Modifier
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
             .drawWithContent {
                 drawContent()
                 if (fraction != null) {
@@ -452,40 +462,57 @@ private fun TimelineRow(block: DayBlock, time: LocalTime, onClick: (() -> Unit)?
             },
     ) {
         Column(Modifier.width(44.dp)) {
-            Text(block.start.format(ClockFormat), style = MaterialTheme.typography.labelMedium, color = if (past) c.inkSecondary else c.ink)
+            Text(
+                block.start.format(ClockFormat),
+                style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = TABULAR_NUMS),
+                color = if (past) c.inkSecondary else c.ink,
+            )
             Text(block.end.format(ClockFormat), style = MaterialTheme.typography.labelMedium, color = c.inkSecondary)
         }
-        Box(
-            Modifier
+        CourseSquare(
+            cc,
+            block.entry.title,
+            size = 36.dp,
+            modifier = Modifier
                 .padding(horizontal = Spacing.sm)
-                .width(4.dp)
-                .height(48.dp)
-                .background(if (past) c.hairline else cc.fg, RoundedCornerShape(Radius.xs)),
+                .alpha(if (past) 0.45f else 1f),
         )
         Column(Modifier.weight(1f)) {
-            MetaText(periods)
             Text(
                 block.entry.title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.titleSmall,
                 color = if (past) c.inkSecondary else c.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            block.entry.room?.takeIf { it.isNotBlank() }?.let { MetaText(it) }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = Spacing.xxs)) {
+                MetaText(periods)
+                block.entry.room?.takeIf { it.isNotBlank() }?.let { room ->
+                    Spacer(Modifier.width(Spacing.sm))
+                    Icon(
+                        Icons.Outlined.Place,
+                        contentDescription = null,
+                        tint = if (past) c.inkSecondary else cc.fg,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(Spacing.xxs))
+                    MetaText(room, color = if (past) c.inkSecondary else cc.fg)
+                }
+            }
         }
     }
 }
 
 /** 授業と授業のあいだの現在時刻ライン */
 @Composable
-private fun NowMarker(time: LocalTime) {
+private fun NowMarker(time: LocalTime, modifier: Modifier = Modifier) {
     val accent = AppTheme.colors.accent
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Start,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = ScreenGutter, vertical = Spacing.xs)
+            .padding(horizontal = ScreenGutter, vertical = Spacing.sm)
             .semantics { contentDescription = "現在 ${time.format(ClockFormat)}" },
     ) {
         Text(time.format(ClockFormat), style = MaterialTheme.typography.labelMedium, color = accent, modifier = Modifier.width(44.dp))

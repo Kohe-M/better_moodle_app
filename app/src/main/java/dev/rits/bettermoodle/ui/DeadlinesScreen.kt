@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
@@ -224,8 +225,13 @@ fun DeadlinesScreen(
                                     color = if (section == DeadlineSection.Overdue) AppTheme.colors.danger else AppTheme.colors.inkSecondary,
                                 )
                             }
-                            items(list, key = { it.id }) { event ->
-                                SwipeToCompleteRow(onComplete = { setDone(event, true) }, modifier = Modifier.animateItem()) {
+                            itemsIndexed(list, key = { _, it -> it.id }) { index, event ->
+                                SwipeToCompleteRow(
+                                    onComplete = { setDone(event, true) },
+                                    modifier = Modifier
+                                        .animateItem()
+                                        .groupedItem(GroupPosition.of(index, list.size), dividerInset = DeadlineTextInset),
+                                ) {
                                     DeadlineRow(
                                         event = event,
                                         nowSec = nowSec,
@@ -241,14 +247,16 @@ fun DeadlinesScreen(
                                 DoneHeader(count = shownDone.size, expanded = showDone, onToggle = { showDone = !showDone })
                             }
                             if (showDone) {
-                                items(shownDone, key = { "done-${it.id}" }) { event ->
+                                itemsIndexed(shownDone, key = { _, it -> "done-${it.id}" }) { index, event ->
                                     DeadlineRow(
                                         event = event,
                                         nowSec = nowSec,
                                         done = true,
                                         onToggleDone = { setDone(event, it) },
                                         onClick = { open(event) },
-                                        modifier = Modifier.animateItem(),
+                                        modifier = Modifier
+                                            .animateItem()
+                                            .groupedItem(GroupPosition.of(index, shownDone.size), dividerInset = DeadlineTextInset),
                                     )
                                 }
                             }
@@ -337,7 +345,7 @@ private fun DoneHeader(count: Int, expanded: Boolean, onToggle: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onToggle)
-            .padding(start = ScreenGutter, end = ScreenGutter, top = Spacing.xl, bottom = Spacing.sm)
+            .padding(start = ScreenGutter + Spacing.xs, end = ScreenGutter, top = Spacing.xl, bottom = Spacing.sm)
             .semantics { stateDescription = if (expanded) "展開" else "折りたたみ" },
     ) {
         Text(
@@ -382,7 +390,7 @@ private fun SwipeToCompleteRow(onComplete: () -> Unit, modifier: Modifier = Modi
             }
         },
     ) {
-        Box(Modifier.background(AppTheme.colors.canvas)) { content() }
+        Box(Modifier.background(AppTheme.colors.surface)) { content() }
     }
 }
 
@@ -467,25 +475,30 @@ internal fun DeadlineRow(
                 Spacer(Modifier.width(Spacing.xs))
                 Text(
                     title,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = if (done) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleSmall,
                     color = if (done) colors.inkSecondary else colors.ink,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
         Spacer(Modifier.width(Spacing.sm))
-        MetaText(
-            label,
-            color = when {
-                done -> colors.inkSecondary
-                urgency == Urgency.Overdue -> colors.danger
-                urgency == Urgency.Soon -> colors.warning
-                else -> colors.inkSecondary
-            },
-        )
+        // 期限切れ・24時間以内は色付きの札にして一覧の中で目に留まるようにする (文言と併用)
+        when {
+            !done && urgency == Urgency.Overdue -> StatusPill(label, Tone.Danger)
+            !done && urgency == Urgency.Soon -> StatusPill(label, Tone.Warning)
+            else -> DeadlineLabel(label)
+        }
     }
 }
+
+@Composable
+private fun DeadlineLabel(label: String) {
+    MetaText(label, color = AppTheme.colors.inkSecondary)
+}
+
+/** 締切の行の本文の開始位置 (完了チェックの分)。行の区切り線もここから引く */
+internal val DeadlineTextInset = Sizes.hitMin + Spacing.sm
 
 internal fun openDeadlineEvent(
     event: ActionEvent,

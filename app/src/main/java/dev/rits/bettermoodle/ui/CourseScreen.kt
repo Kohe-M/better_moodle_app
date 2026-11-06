@@ -1,5 +1,11 @@
 package dev.rits.bettermoodle.ui
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Place
+import androidx.compose.material.icons.outlined.Schedule
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -321,8 +327,12 @@ fun CourseScreen(
                                 }
                             }
                         }
+                        // セクションごとに1枚のカード: 見出し → 概要 → モジュール
                         sections.forEachIndexed { index, section ->
                             val isOpen = section.id in open
+                            val hasSummary = isOpen && htmlHasRenderableContent(section.summary)
+                            val groups = if (isOpen) groupSectionModules(section.modules.filter { it.uservisible }) else emptyList()
+                            val rows = 1 + (if (hasSummary) 1 else 0) + groups.size
                             item(key = "sec-${section.id}") {
                                 SectionHeader(
                                     section = section,
@@ -332,18 +342,33 @@ fun CourseScreen(
                                     onToggle = {
                                         expanded = if (isOpen) open - section.id else open + section.id
                                     },
+                                    modifier = Modifier
+                                        .padding(top = Spacing.md)
+                                        .groupedItem(GroupPosition.of(0, rows)),
                                 )
                             }
-                            if (isOpen) {
-                                if (htmlHasRenderableContent(section.summary)) {
-                                    item(key = "sec-summary-${section.id}") { SectionSummary(section, onOpenUrl) }
+                            if (hasSummary) {
+                                item(key = "sec-summary-${section.id}") {
+                                    SectionSummary(
+                                        section,
+                                        onOpenUrl,
+                                        modifier = Modifier.groupedItem(GroupPosition.of(1, rows)),
+                                    )
                                 }
-                                val groups = groupSectionModules(section.modules.filter { it.uservisible })
-                                groups.forEachIndexed { groupIndex, group ->
-                                    val keyModule = group.module ?: group.labels.firstOrNull()
-                                    item(key = "mod-${section.id}-${keyModule?.id ?: groupIndex}") {
-                                        ModuleGroupItem(group = group, onOpenUrl = onOpenUrl, onOpenModule = ::openModule)
-                                    }
+                            }
+                            val offset = if (hasSummary) 2 else 1
+                            groups.forEachIndexed { groupIndex, group ->
+                                val keyModule = group.module ?: group.labels.firstOrNull()
+                                item(key = "mod-${section.id}-${keyModule?.id ?: groupIndex}") {
+                                    ModuleGroupItem(
+                                        group = group,
+                                        onOpenUrl = onOpenUrl,
+                                        onOpenModule = ::openModule,
+                                        modifier = Modifier.groupedItem(
+                                            GroupPosition.of(offset + groupIndex, rows),
+                                            dividerInset = if (groupIndex == 0 && !hasSummary) ScreenGutter else ScreenGutter + ModuleLeadingWidth,
+                                        ),
+                                    )
                                 }
                             }
                         }
@@ -465,8 +490,9 @@ private fun folderFileLabel(filename: String, mimeType: String?): String =
 
 /**
  * コース詳細のヘッダー (DESIGN.md §8.4): コース名 (title-lg・2行)、曜日時限・教室、
- * シラバス / Moodleで開く。授業カラーのスクエアを押すと色を変えられる。
+ * シラバス / Moodleで開く。カードにまとめ、授業カラーのスクエアを押すと色を変えられる。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CourseHeader(
     name: String,
@@ -478,65 +504,91 @@ private fun CourseHeader(
     onOpenInMoodle: () -> Unit,
     onChangeColor: () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = ScreenGutter).padding(top = Spacing.xs, bottom = Spacing.sm)) {
-        Row(verticalAlignment = Alignment.Top) {
-            Box(
-                Modifier
-                    .size(Sizes.hitMin)
-                    .clip(RoundedCornerShape(Radius.sm))
-                    .clickable(onClickLabel = "授業カラーを変更", onClick = onChangeColor),
-                contentAlignment = Alignment.Center,
-            ) {
-                CourseSquare(color, name, size = 32.dp)
-            }
-            Spacer(Modifier.width(Spacing.md))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    name,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = AppTheme.colors.ink,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.semantics { heading() },
-                )
-                code?.let { MetaText("授業コード $it", modifier = Modifier.padding(top = Spacing.xxs)) }
-            }
-        }
-        if (slots.isNotEmpty()) {
-            Spacer(Modifier.height(Spacing.md))
-            slots.groupBy { it.dayIndex }.forEach { (day, entries) ->
-                val periods = entries.map { it.period }.sorted()
-                val periodText = if (periods.size > 1 && periods.last() - periods.first() == periods.size - 1) {
-                    "${periods.first()}–${periods.last()}限"
-                } else {
-                    periods.joinToString("・") { "${it}限" }
+    AppCard(
+        modifier = Modifier.padding(horizontal = ScreenGutter).padding(top = Spacing.xs, bottom = Spacing.sm),
+        shape = RoundedCornerShape(Radius.lg),
+    ) {
+        Column(Modifier.padding(Spacing.lg)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(Radius.sm))
+                        .clickable(onClickLabel = "授業カラーを変更", onClick = onChangeColor),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CourseSquare(color, name, size = 48.dp)
                 }
-                val room = entries.firstNotNullOfOrNull { it.room?.takeIf(String::isNotBlank) }
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = Spacing.xxs)) {
-                    Box(Modifier.size(8.dp).background(color.fg, CircleShape))
-                    Spacer(Modifier.width(Spacing.sm))
+                Spacer(Modifier.width(Spacing.md))
+                Column(Modifier.weight(1f)) {
                     Text(
-                        "${WeekdayNames.getOrElse(day) { "" }}曜 $periodText" + (room?.let { " · $it" } ?: ""),
-                        style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = TABULAR_NUMS),
+                        name,
+                        style = MaterialTheme.typography.titleLarge,
                         color = AppTheme.colors.ink,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.semantics { heading() },
+                    )
+                    code?.let { MetaText("授業コード $it", modifier = Modifier.padding(top = Spacing.xxs)) }
+                }
+            }
+            if (slots.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    modifier = Modifier.padding(top = Spacing.md),
+                ) {
+                    slots.groupBy { it.dayIndex }.forEach { (day, entries) ->
+                        val periods = entries.map { it.period }.sorted()
+                        val periodText = if (periods.size > 1 && periods.last() - periods.first() == periods.size - 1) {
+                            "${periods.first()}–${periods.last()}限"
+                        } else {
+                            periods.joinToString("・") { "${it}限" }
+                        }
+                        CourseInfoChip(Icons.Outlined.Schedule, "${WeekdayNames.getOrElse(day) { "" }}曜 $periodText", color)
+                        entries.firstNotNullOfOrNull { it.room?.takeIf(String::isNotBlank) }?.let { room ->
+                            CourseInfoChip(Icons.Outlined.Place, room, color)
+                        }
+                    }
+                }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = Spacing.md),
+            ) {
+                if (onSyllabus != null) {
+                    SecondaryButton(
+                        if (resolvingSyllabus) "シラバスを検索中" else "シラバス",
+                        onClick = onSyllabus,
+                        enabled = !resolvingSyllabus,
+                        leading = {
+                            Icon(Icons.AutoMirrored.Outlined.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp))
+                        },
                     )
                 }
+                TertiaryButton("Moodleで開く", onClick = onOpenInMoodle)
             }
         }
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(top = Spacing.sm),
-        ) {
-            if (onSyllabus != null) {
-                SecondaryButton(
-                    if (resolvingSyllabus) "シラバスを検索中" else "シラバス",
-                    onClick = onSyllabus,
-                    enabled = !resolvingSyllabus,
-                )
-            }
-            TertiaryButton("Moodleで開く", onClick = onOpenInMoodle)
-        }
+    }
+}
+
+/** 曜日時限・教室の札。授業カラーの面に fg の文字 */
+@Composable
+private fun CourseInfoChip(icon: ImageVector, text: String, color: CourseColor) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .background(color.bg, RoundedCornerShape(Radius.xs))
+            .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+    ) {
+        Icon(icon, contentDescription = null, tint = color.fg, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(Spacing.xs))
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = TABULAR_NUMS),
+            color = color.fg,
+        )
     }
 }
 
@@ -579,7 +631,7 @@ private fun CourseColorSheet(
     }
 }
 
-/** セクション見出し (折りたたみ)。現在週には「今週」を添える */
+/** セクション見出し (折りたたみ)。セクションのカードの最上段。現在週には「今週」を添える */
 @Composable
 private fun SectionHeader(
     section: CourseSection,
@@ -587,31 +639,34 @@ private fun SectionHeader(
     expanded: Boolean,
     count: Int,
     onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onToggle)
-            .padding(start = ScreenGutter, end = ScreenGutter, top = Spacing.lg, bottom = Spacing.sm)
+            .padding(start = ScreenGutter, end = Spacing.md, top = Spacing.md, bottom = Spacing.md)
             .semantics { stateDescription = if (expanded) "展開" else "折りたたみ" },
     ) {
         Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    htmlToPlainText(section.name).ifBlank { "セクション ${section.section}" },
-                    style = MaterialTheme.typography.titleMedium,
-                    color = AppTheme.colors.ink,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false).semantics { heading() },
-                )
-                if (current) {
-                    Spacer(Modifier.width(Spacing.sm))
-                    StatusPill("今週", containerColor = AppTheme.colors.accentSoft, contentColor = AppTheme.colors.accent)
+            Text(
+                htmlToPlainText(section.name).ifBlank { "セクション ${section.section}" },
+                style = MaterialTheme.typography.titleMedium,
+                color = AppTheme.colors.ink,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.semantics { heading() },
+            )
+            if (current || count > 0) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    modifier = Modifier.padding(top = Spacing.xs),
+                ) {
+                    if (current) StatusPill("今週", Tone.Accent)
+                    if (count > 0) StatusPill("${count}件", Tone.Neutral)
                 }
             }
-            if (!expanded && count > 0) MetaText("${count}件")
         }
         Icon(
             if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
@@ -625,27 +680,29 @@ private fun SectionHeader(
 private fun SectionSummary(
     section: CourseSection,
     onOpenUrl: (url: String, title: String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     HtmlText(
         html = section.summary,
         onOpenUrl = { onOpenUrl(it, section.name.ifBlank { "Moodle" }) },
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = ScreenGutter, vertical = 4.dp),
+        modifier = modifier.padding(horizontal = ScreenGutter, vertical = Spacing.md),
     )
 }
 
-/** 行頭の印の幅。ラベル文は印の分だけ字下げしてモジュールに従属させる */
-private val ModuleLeadingWidth = 36.dp
+/** 行頭の種類タイル (36) + 間隔。ラベル文は印の分だけ字下げしてモジュールに従属させる */
+private val ModuleLeadingWidth = 36.dp + Spacing.md
 
 @Composable
 private fun ModuleGroupItem(
     group: ModuleGroup,
     onOpenUrl: (url: String, title: String) -> Unit,
     onOpenModule: (CourseModule) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val module = group.module
-    Column(Modifier.fillMaxWidth()) {
+    Column(modifier.fillMaxWidth()) {
         if (module != null) {
             ModuleRow(module = module, onOpenUrl = onOpenUrl, onClick = { onOpenModule(module) })
         }
@@ -654,10 +711,10 @@ private fun ModuleGroupItem(
                 modifier = Modifier.padding(
                     start = if (module != null) ScreenGutter + ModuleLeadingWidth else ScreenGutter,
                     end = ScreenGutter,
-                    top = 4.dp,
-                    bottom = 8.dp,
+                    top = if (module != null) 0.dp else Spacing.md,
+                    bottom = Spacing.md,
                 ),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
                 group.labels.forEach { LabelText(it, onOpenUrl) }
             }
@@ -679,8 +736,8 @@ private fun LabelText(
 }
 
 /**
- * モジュールの1行。課題・小テスト (やること) だけ藍のコマ印で目立たせ、
- * 資料・リンク等 (見るもの) は無彩色の小さなアイコンにする。
+ * モジュールの1行。種類のタイル (課題・小テスト = accent、ほか = 無彩色) + 名前 + 種類。
+ * 課題・小テストは締切を時計アイコン付きで添える。
  */
 @Composable
 private fun ModuleRow(
@@ -691,41 +748,57 @@ private fun ModuleRow(
     val isTask = module.modName == "assign" || module.modName == "quiz"
     val typeLabel = module.modPlural.ifBlank { module.modName }
     ListRow(onClick = onClick) {
-        Box(Modifier.width(ModuleLeadingWidth).padding(top = 2.dp)) {
-            LeadingIcon(moduleIcon(module), contentDescription = null)
-        }
+        IconTile(moduleIcon(module), tone = moduleTone(module), size = 36.dp, iconSize = 20.dp)
+        Spacer(Modifier.width(Spacing.md))
         Column(Modifier.weight(1f)) {
             // Moodle はモジュール名を HTML エスケープして返す ("Q&amp;A")
             Text(
                 htmlToPlainText(module.name).ifBlank { module.name },
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.titleSmall,
                 color = AppTheme.colors.ink,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            val sub = buildString {
-                append(typeLabel)
-                // 課題・小テストは最後の日付 (締切・終了) を添える
-                if (isTask) {
-                    module.dates.lastOrNull { it.timestamp > 0 }?.let { date ->
-                        append(" · ${date.label.trim().trimEnd(':', '：')} ${formatMoodleDateTime(date.timestamp)}")
+            MetaText(
+                typeLabel + (module.availabilityinfo?.let { " · 公開条件あり" } ?: ""),
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            // 課題・小テストは最後の日付 (締切・終了) を添える
+            if (isTask) {
+                module.dates.lastOrNull { it.timestamp > 0 }?.let { date ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = Spacing.xs)) {
+                        Icon(Icons.Outlined.Schedule, contentDescription = null, tint = AppTheme.colors.ink, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(Spacing.xs))
+                        Text(
+                            "${date.label.trim().trimEnd(':', '：')} ${formatMoodleDateTime(date.timestamp)}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AppTheme.colors.ink,
+                        )
                     }
                 }
-                module.availabilityinfo?.let { append(" · 公開条件あり") }
             }
-            MetaText(sub, modifier = Modifier.padding(top = 2.dp))
             if (htmlHasRenderableContent(module.description)) {
                 HtmlText(
                     html = module.description,
                     onOpenUrl = { onOpenUrl(it, module.name.ifBlank { "Moodle" }) },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = Spacing.xs),
                 )
             }
         }
+        Icon(
+            Icons.Outlined.ChevronRight,
+            contentDescription = null,
+            tint = AppTheme.colors.inkTertiary,
+            modifier = Modifier.padding(start = Spacing.xs, top = Spacing.sm),
+        )
     }
 }
+
+/** 種類タイルの色調。やること (課題・小テスト) は accent、見るもの (資料・リンク等) は無彩色 */
+private fun moduleTone(module: CourseModule): Tone =
+    if (module.modName == "assign" || module.modName == "quiz") Tone.Accent else Tone.Neutral
 
 /** 資料系モジュールのアイコン (無彩色で使う) */
 private fun moduleIcon(module: CourseModule): ImageVector =

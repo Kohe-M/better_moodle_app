@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import dev.rits.bettermoodle.AppContainer
 import dev.rits.bettermoodle.ui.theme.AppTheme
+import androidx.compose.ui.unit.dp
 import dev.rits.bettermoodle.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
@@ -76,16 +77,19 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             SectionLabel("アカウント")
             val name = (site as? UiState.Success)?.data?.fullname?.takeIf { it.isNotBlank() }
-            ListRow(onClick = null, verticalAlignment = Alignment.CenterVertically) {
-                LeadingIcon(Icons.Outlined.Person, contentDescription = null)
+            ListRow(onClick = null, verticalAlignment = Alignment.CenterVertically, modifier = Modifier.groupedItem(GroupPosition.First)) {
+                IconTile(Icons.Outlined.Person, tone = Tone.Accent, size = 36.dp, iconSize = 20.dp)
                 Column(Modifier.weight(1f).padding(start = Spacing.md)) {
                     Text(name ?: "Moodle+R", style = MaterialTheme.typography.bodyLarge, color = AppTheme.colors.ink)
                     MetaText("lms.ritsumei.ac.jp にログイン中")
                 }
             }
-            RowDivider()
-            ListRow(onClick = { confirmClearWeb = true }, verticalAlignment = Alignment.CenterVertically) {
-                LeadingIcon(Icons.Outlined.Cookie, contentDescription = null)
+            ListRow(
+                onClick = { confirmClearWeb = true },
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.groupedItem(GroupPosition.Last, dividerInset = ScreenGutter + 36.dp + Spacing.md),
+            ) {
+                IconTile(Icons.Outlined.Cookie, size = 36.dp, iconSize = 20.dp)
                 Column(Modifier.weight(1f).padding(start = Spacing.md)) {
                     Text("Webのログイン状態を削除", style = MaterialTheme.typography.bodyLarge, color = AppTheme.colors.ink)
                     MetaText("ポータルとMoodleのWeb画面", maxLines = 2)
@@ -93,8 +97,8 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
             }
 
             SectionLabel("このアプリについて")
-            ListRow(onClick = null, verticalAlignment = Alignment.Top) {
-                LeadingIcon(Icons.Outlined.Info, contentDescription = null)
+            ListRow(onClick = null, verticalAlignment = Alignment.Top, modifier = Modifier.groupedItem(GroupPosition.Single)) {
+                IconTile(Icons.Outlined.Info, size = 36.dp, iconSize = 20.dp)
                 Text(
                     "立命館大学の学生が作った非公式のMoodle+Rクライアントです。大学・Moodle公式のアプリではありません。",
                     style = MaterialTheme.typography.bodyMedium,

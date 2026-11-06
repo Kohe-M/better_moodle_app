@@ -2,17 +2,17 @@
 Design · MD
 ---
 name: Campus — University Timetable & Moodle Client
-version: 1.0.0
-updated: 2026-09-27
+version: 1.1.0
+updated: 2026-10-12
 platforms: [ios, android, web]
 colors:
   # ---- Light ----
-  canvas: "#F7F6F3"          # アプリ背景（わずかに温かいオフホワイト）
+  canvas: "#F2F1EE"          # アプリ背景（わずかに温かいオフホワイト。白いカードとの差で面を分ける）
   surface: "#FFFFFF"         # カード・シート
   surface-sunken: "#EFEEEA"  # 時間割グリッドの空きコマ、入力欄
   hairline: "#E4E2DD"        # 0.5–1px 区切り線
   ink: "#1B1B1F"             # 本文・見出し            (on surface 17.2:1)
-  ink-secondary: "#5C5C66"   # 補足テキスト            (on surface 6.6:1 / on canvas 6.1:1)
+  ink-secondary: "#5C5C66"   # 補足テキスト            (on surface 6.6:1 / on canvas 5.9:1)
   ink-tertiary: "#8B8B94"    # アイコン・装飾のみ。本文に使用禁止 (3.4:1)
   accent: "#2B59D9"          # 唯一のブランドアクセント (5.9:1)
   on-accent: "#FFFFFF"
@@ -20,9 +20,12 @@ colors:
   danger: "#C8372D"          # 期限切れ・エラー (5.2:1)
   warning: "#A15C00"         # 24時間以内の締切 (5.2:1)
   success: "#1D7A4F"         # 提出済み・完了 (5.3:1)
+  danger-soft: "#FDF1EF"     # 期限切れ・エラーの面 (danger 文字 4.7:1)
+  warning-soft: "#FCF0DC"    # 24時間以内の面 (warning 文字 4.6:1)
+  success-soft: "#E2F3EA"    # 提出済みの面 (success 文字 4.6:1)
   # ---- Dark ----
-  canvas-dark: "#111113"
-  surface-dark: "#1A1A1D"
+  canvas-dark: "#0E0E10"
+  surface-dark: "#1C1C1F"
   surface-sunken-dark: "#141416"
   hairline-dark: "#2A2A2F"
   ink-dark: "#EDEDF0"            # 14.9:1
@@ -34,6 +37,9 @@ colors:
   danger-dark: "#FF8A7F"
   warning-dark: "#F2B24C"
   success-dark: "#5CCB94"
+  danger-soft-dark: "#3A1E1C"
+  warning-soft-dark: "#33270F"
+  success-soft-dark: "#15291F"
   # ---- Course palette（授業カラー。bg/fg ペアで使う。全ペア 5.4:1 以上を検証済み）----
   course-blue:   { bg: "#E3ECFF", fg: "#1F47B8", bg-dark: "#1B2A52", fg-dark: "#A9C1FF" }
   course-teal:   { bg: "#DDF3F0", fg: "#0B6B60", bg-dark: "#12332F", fg-dark: "#7FD6C9" }
@@ -101,10 +107,9 @@ components:
     border: 1px dashed "{colors.hairline}"
     rounded: "{rounded.sm}"
   now-card:
-    backgroundColor: "{colors.surface}"
+    backgroundColor: "{colors.course-*.bg}"   # 授業がないときは surface + hairline
     rounded: "{rounded.lg}"
     padding: "{spacing.lg}"
-    accentBar: 4px "{colors.course-*.fg}"
   deadline-row:
     minHeight: 56px
     padding: 12px 16px
@@ -115,6 +120,20 @@ components:
     padding: "{spacing.lg}"
     border: 0.5px "{colors.hairline}"
     shadow: none
+  detail-card:                 # 詳細画面のまとまり (説明・詳細・提出物)
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.md}"
+    padding: "{spacing.lg}"
+    header: 28px icon-tile (accent-soft / accent) + "{typography.title-md}"
+  status-hero:                 # 詳細画面最上部の状態カード (提出期限・受付終了)
+    backgroundColor: "{colors.*-soft}"   # 状態の色調。通常は accent-soft
+    rounded: "{rounded.lg}"
+    padding: "{spacing.lg}"
+  grouped-list:                # 一覧はまとまりごとに1枚のカードにする
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.md}"    # 先頭と末尾の角だけ
+    margin: 0 "{spacing.gutter-phone}"
+    divider: 0.5px "{colors.hairline}" (行頭の印の分だけ字下げ)
   button-primary:
     backgroundColor: "{colors.accent}"
     textColor: "{colors.on-accent}"
@@ -193,7 +212,7 @@ components:
 - `ink-tertiary` はコントラスト3.4:1のため **アイコン・区切り記号・プレースホルダー以外の文字に使わない**。
 - 状態色は必ず **テキストかアイコンと併用**（色だけで状態を伝えない）。
 ### 授業カラー（course palette）
-- 10色。bg（面）と fg（文字・アクセントバー）を必ずペアで使う。bg 上に `ink` を載せてもよいが、fg の方が識別性が高いので推奨は fg。
+- 10色。bg（面）と fg（文字・アイコン）を必ずペアで使う。bg 上に `ink` を載せてもよいが、fg の方が識別性が高いので推奨は fg。
 - 自動割り当て：コースIDのハッシュ mod 10。隣接コマ（同曜日の連続時限・同時限の隣曜日）で同色が並ぶ場合は次の色にずらす。
 - ユーザーが変更可能。ただしパレット外の任意色（カラーピッカー）は提供しない（コントラスト保証が崩れるため）。
 - 授業カラーを UI クローム（タブバー、ボタン）に使わない。授業に属する要素にだけ使う。
@@ -270,15 +289,15 @@ Tide Guide 由来。「今日」画面の最上部背景だけ、朝・昼・夕
  
 ### 8.1 Now Card（「今日」画面の最上部）
 ```
-┌──────────────────────────────┐
-▌ 次の授業 · 3限                  │  label / ink-secondary
-▌ あと 12 分                      │  countdown / ink
-▌ データモデル論                   │  body / ink（2行まで）
-▌ 📍 クリエーションコア C301       │  title-md / course fg
-▌ 13:00–14:35   [出席を記録]      │  caption tabular / ボタンは secondary
-└──────────────────────────────┘
+╭──────────────────────────────╮
+│ 次の授業 · 3限                  │  label / ink-secondary
+│ あと 12 分                      │  countdown / ink
+│ データモデル論                   │  body / ink（2行まで）
+│ 📍 クリエーションコア C301       │  title-md / course fg
+│ 13:00–14:35   [出席を記録]      │  caption tabular / ボタンは secondary
+╰──────────────────────────────╯
 ```
-- 左端 4px のアクセントバーに授業カラー fg。
+- カード全体を授業カラーの bg で塗る（授業がないときは surface + hairline）。左端の色帯は使わない。
 - 状態遷移：授業前「あと N 分」→ 授業中「残り N 分」＋進捗バー → 授業後は次の授業へ。今日の授業が終われば「今日の授業は終わりです」＋明日の1限。
 - 空き時間が90分以上あるときは「空きコマ 2時間」と表示（学生の実際の関心事）。
 - タップで授業詳細。長押しでメモ。
@@ -301,11 +320,18 @@ Tide Guide 由来。「今日」画面の最上部背景だけ、朝・昼・夕
 - スワイプ：右→「完了にする（アプリ内のみ）」、左→「リマインダー」。Moodle 上の提出と、アプリ内の「完了扱い」を**視覚的に区別**する（提出済み＝success の✓、手動完了＝ink-secondary の✓）。
 - 種類アイコン（課題/小テスト/フォーラム/その他）は ink-secondary の単色線アイコン。
 ### 8.4 コース一覧・コース詳細
-- 一覧：カード型ではなくリスト。行頭に授業カラーの角丸スクエア（24px、bg色＋頭文字 fg）。
-- 詳細ヘッダー：コース名（title-lg、2行）、教員、曜日時限・教室、「Moodleで開く」リンク。
-- セクション（週/トピック）は折りたたみ。**現在週のセクションを自動で展開し、そこへスクロール**。
-- 活動行：種類アイコン＋名称＋右端に状態（完了✓、締切、ダウンロード済みアイコン）。
+- 一覧：1件ずつのカードではなく、まとまり（今学期・過去など）ごとに1枚のカードにした行のリスト（grouped-list）。行頭に授業カラーの角丸スクエア（36px、bg色＋頭文字 fg）。
+- 詳細ヘッダー：カードに、授業カラーのスクエア（48px）＋コース名（title-lg、2行）、曜日時限・教室の札（授業カラー bg＋fg）、「シラバス」「Moodleで開く」。
+- セクション（週/トピック）はセクションごとに1枚のカードにし、折りたたむ。**現在週のセクションを自動で展開し、そこへスクロール**。
+- 活動行：種類のアイコンタイル（課題・小テストは accent-soft、資料等は surface-sunken）＋名称（600）＋右端に状態（完了✓、締切、ダウンロード済みアイコン）。
 - ファイル：ダウンロード状態を3種で表示（未取得 / 取得中の進捗リング / 取得済み）。オフラインで開けるかが一目でわかること。
+### 8.4.1 詳細画面（課題・小テスト・フォーラム・ページ）
+- 文章を並べるだけにしない。上から「種類（アイコン＋課題など）と題名」→ status-hero → detail-card の順に積む。
+- status-hero：期限の日時を title-lg、残り時間を状態色で、状態の札は surface 地に状態色の文字で載せる。
+- detail-card：見出しにアイコンタイル（28px）。「ラベル … 値」はアイコン付きの行にし、値を 600 で右に寄せ、行間に hairline。
+- ファイルは種類のアイコンタイル（40px、accent-soft）＋ファイル名（600）＋メタ情報1行＋文字ボタン。
+- フォーラムの投稿は1件ずつカードにし、投稿者の頭文字の丸と日時を先頭に置く。
+- Primary ボタン（最終提出・受験する）は画面の末尾に全幅で1つだけ。
 ### 8.5 同期・オフライン表示
 - 画面上部ではなく、各リストの末尾に `caption / ink-secondary` で「最終同期 9:41」。
 - オフライン時：ナビゲーションバー直下に 1行のバナー（surface-sunken 背景、ink-secondary、「オフライン — 9:41 時点の情報」）。赤くしない。
@@ -383,10 +409,11 @@ Tide Guide 由来。「今日」画面の最上部背景だけ、朝・昼・夕
 - OS標準のナビゲーション部品を使う。
 **Don't**
 - カードに影を付けない。グラデーション背景を使わない。
+- カードや行の左端に色帯（アクセントバー）を引いて強調しない。色は面（bg）・アイコンタイル・札で付ける。
 - コンテンツ（セル・カード・リスト）にガラス/ブラー/半透明を使わない。ガラスを重ねない。
 - accent 以外のブランド色を追加しない。1画面に Primary ボタンを2つ置かない。
 - `ink-tertiary` を本文に使わない。11px 未満の文字を作らない。
-- 締切を色だけで表現しない。赤を「期限切れ」以外に使わない。
+- 締切を色だけで表現しない。赤を「期限切れ」とエラー以外に使わない（ファイルの種類などに使わない）。
 - タブを5つより増やさない。タブにアクションを入れない。
 - 全画面スピナー、自動で消えるだけのエラートーストを使わない。
 - 授業カラーを任意のカラーピッカーで選ばせない。

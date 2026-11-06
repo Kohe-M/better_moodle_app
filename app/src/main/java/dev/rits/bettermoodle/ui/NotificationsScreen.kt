@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -182,15 +183,17 @@ fun NotificationsScreen(
                                 trailing = filterMenu,
                             )
                         }
-                        items(unread, key = { it.id }) { n ->
-                            NotificationRow(n) { openNotification(n) }
-                            RowDivider(inset = NotificationTextInset)
+                        itemsIndexed(unread, key = { _, it -> it.id }) { index, n ->
+                            NotificationRow(n, Modifier.groupedItem(GroupPosition.of(index, unread.size), NotificationTextInset)) {
+                                openNotification(n)
+                            }
                         }
                         if (read.isNotEmpty()) {
                             item(key = "read-header") { SectionLabel("既読") }
-                            items(read, key = { it.id }) { n ->
-                                NotificationRow(n) { openNotification(n) }
-                                RowDivider(inset = NotificationTextInset)
+                            itemsIndexed(read, key = { _, it -> it.id }) { index, n ->
+                                NotificationRow(n, Modifier.groupedItem(GroupPosition.of(index, read.size), NotificationTextInset)) {
+                                    openNotification(n)
+                                }
                             }
                         }
                         if (lastPage.hasMore || loadMoreError != null) {
@@ -256,12 +259,12 @@ private val OtherDay: DateTimeFormatter = DateTimeFormatter.ofPattern("M/d")
  * 太字は使わず、点とコントラストで未読を浮かせる。
  */
 @Composable
-private fun NotificationRow(n: PopupNotification, onClick: () -> Unit) {
+private fun NotificationRow(n: PopupNotification, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val c = MaterialTheme.colorScheme
     val created = Instant.ofEpochSecond(n.timecreated).atZone(ZoneId.systemDefault())
     val time = if (created.toLocalDate() == LocalDate.now()) created.format(TodayTime) else created.format(OtherDay)
     val unread = !n.read
-    ListRow(onClick = onClick, contentPadding = PaddingValues(end = ScreenGutter, top = 12.dp, bottom = 12.dp)) {
+    ListRow(onClick = onClick, modifier = modifier, contentPadding = PaddingValues(end = ScreenGutter, top = 12.dp, bottom = 12.dp)) {
         Box(Modifier.width(NotificationTextInset).padding(top = 7.dp), contentAlignment = Alignment.Center) {
             if (unread) {
                 Box(
@@ -275,7 +278,7 @@ private fun NotificationRow(n: PopupNotification, onClick: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text(
                 n.subject,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 color = if (unread) c.onSurface else c.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,

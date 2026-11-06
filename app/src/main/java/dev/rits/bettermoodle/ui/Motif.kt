@@ -66,7 +66,7 @@ fun courseColor(key: String): CourseColor {
 fun courseColor(courseCode: String?, courseId: Long?, title: String = ""): CourseColor =
     courseColor(CourseColors.key(courseCode, courseId, title))
 
-/** コース一覧の行頭: 授業カラーの角丸スクエア (24px、bg 色 + 頭文字 fg) */
+/** 授業カラーの角丸スクエア (bg 色 + 頭文字 fg)。頭文字は大きさに合わせて大きくする */
 @Composable
 fun CourseSquare(color: CourseColor, name: String, modifier: Modifier = Modifier, size: Dp = 24.dp) {
     Box(
@@ -78,7 +78,11 @@ fun CourseSquare(color: CourseColor, name: String, modifier: Modifier = Modifier
     ) {
         Text(
             courseInitial(name),
-            style = MaterialTheme.typography.labelLarge,
+            style = when {
+                size >= 48.dp -> MaterialTheme.typography.titleLarge
+                size >= 32.dp -> MaterialTheme.typography.titleMedium
+                else -> MaterialTheme.typography.labelLarge
+            },
             color = color.fg,
             textAlign = TextAlign.Center,
         )

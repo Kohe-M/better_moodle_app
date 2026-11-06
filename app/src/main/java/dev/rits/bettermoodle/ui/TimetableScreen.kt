@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -434,7 +435,7 @@ private fun CellDetailPane(
             .verticalScroll(rememberScrollState())
             .padding(Spacing.gutterTablet),
     ) {
-        Box(Modifier.width(32.dp).height(4.dp).background(cc.fg, RoundedCornerShape(Radius.xs)))
+        CourseSquare(cc, entry.title, size = 40.dp)
         Spacer(Modifier.height(Spacing.md))
         Text(entry.title, style = MaterialTheme.typography.titleLarge, color = AppTheme.colors.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(Spacing.sm))
@@ -515,14 +516,16 @@ private fun TimetableList(
                     color = if (day == todayIndex) AppTheme.colors.accent else AppTheme.colors.inkSecondary,
                 )
             }
-            items(entries.sortedBy { it.period }, key = { "e-$day-${it.period}-${it.title}" }) { entry ->
+            val sorted = entries.sortedBy { it.period }
+            itemsIndexed(sorted, key = { _, it -> "e-$day-${it.period}-${it.title}" }) { index, entry ->
                 val cc = courseColor(entry.courseCode, entry.courseId, entry.title)
                 val range = Timetable.PERIOD_TIMES[entry.period]
                 ListRow(
                     onClick = entry.courseId?.let { id -> { onOpenCourse(id, entry.title, entry.courseCode) } },
                     verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.groupedItem(GroupPosition.of(index, sorted.size), dividerInset = ScreenGutter + 36.dp + Spacing.md),
                 ) {
-                    Box(Modifier.width(4.dp).height(40.dp).background(cc.fg, RoundedCornerShape(Radius.xs)))
+                    CourseSquare(cc, entry.title, size = 36.dp)
                     Spacer(Modifier.width(Spacing.md))
                     Column(Modifier.weight(1f)) {
                         MetaText("${entry.period}限" + (range?.let { " ${it.first}–${it.second}" } ?: ""))

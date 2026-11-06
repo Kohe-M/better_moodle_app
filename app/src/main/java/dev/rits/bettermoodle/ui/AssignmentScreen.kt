@@ -16,8 +16,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -62,6 +60,29 @@ import dev.rits.bettermoodle.data.SubmissionStatusResponse
 import dev.rits.bettermoodle.data.SubmittedFileUi
 import dev.rits.bettermoodle.data.previewKindFor
 import dev.rits.bettermoodle.ui.theme.AppTheme
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.outlined.Assignment
+import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.EventAvailable
+import androidx.compose.material.icons.outlined.EventBusy
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Grade
+import androidx.compose.material.icons.automirrored.outlined.Grading
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.PictureAsPdf
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Upload
+import androidx.compose.ui.text.style.TextOverflow
+import dev.rits.bettermoodle.data.AssignmentSubmissionLabel
+import dev.rits.bettermoodle.ui.theme.Radius
+import dev.rits.bettermoodle.ui.theme.Spacing
 import java.util.Locale
 
 /** 課題ページのMoodle URL (Web Service未対応時・書式付き編集時の逃げ道) */
@@ -226,18 +247,20 @@ fun AssignmentScreen(
                 is AssignmentLoad.Ready -> {
                     val assignment = load.data.assignment
                     val ui = load.data.ui
-                    Text(assignment.name, style = MaterialTheme.typography.headlineSmall)
+                    val canEdit = AssignmentAction.Edit in ui.actions
+                    DetailTitle(assignment.name, typeLabel = "課題", typeIcon = Icons.AutoMirrored.Outlined.Assignment)
                     AssignmentStatusHero(assignment, ui)
                     ui.unsupportedReason?.let { reason ->
                         MessageBanner(reason, isError = false, onDismiss = null)
                     }
                     if (htmlHasRenderableContent(assignment.intro)) {
-                        SubsectionTitle("課題の説明")
-                        HtmlText(
-                            html = assignment.intro,
-                            onOpenUrl = { onOpenUrl(it, assignment.name) },
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                        DetailCard(title = "課題の説明", icon = Icons.Outlined.Description) {
+                            HtmlText(
+                                html = assignment.intro,
+                                onOpenUrl = { onOpenUrl(it, assignment.name) },
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
                     }
                     IntroAttachmentsSection(
                         attachments = assignment.introattachments,
@@ -246,37 +269,43 @@ fun AssignmentScreen(
                     )
                     AssignmentDetails(assignment, ui)
                     FeedbackBlock(load.data.status, onOpenUrl)
-                    SubmittedTextSection(ui, onOpenUrl)
-                    SubmittedFilesSection(
-                        files = ui.files,
-                        canRemove = AssignmentAction.Edit in ui.actions && assignment.supports("file") && !state.busy,
-                        onOpenFilePreview = onOpenFilePreview,
-                        onDownloadFile = { downloadToShare = it },
-                        onRemoveFile = { removeFileTarget = it },
-                    )
 
-                    if (assignment.supports("onlinetext") && AssignmentAction.Edit in ui.actions) {
-                        OnlineTextEditor(
-                            state = state,
-                            ui = ui,
-                            onTextChange = viewModel::updateText,
-                            onSave = { viewModel.saveText() },
-                            onEditInMoodle = { onOpenMoodleWeb(webUrl, title) },
+                    DetailCard(title = "あなたの提出", icon = Icons.Outlined.Upload) {
+                        SubmittedTextSection(ui, onOpenUrl)
+                        SubmittedFilesSection(
+                            files = ui.files,
+                            canRemove = canEdit && assignment.supports("file") && !state.busy,
+                            onOpenFilePreview = onOpenFilePreview,
+                            onDownloadFile = { downloadToShare = it },
+                            onRemoveFile = { removeFileTarget = it },
                         )
-                    }
-
-                    if (assignment.supports("file") && AssignmentAction.Edit in ui.actions) {
-                        Button(
-                            onClick = { filePicker.launch(arrayOf("*/*")) },
-                            enabled = !state.busy,
-                        ) {
-                            Icon(Icons.Filled.AttachFile, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("ファイルを追加")
+                        if (assignment.supports("file") && canEdit) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(top = Spacing.md),
+                            ) {
+                                SecondaryButton(
+                                    "ファイルを追加",
+                                    onClick = { filePicker.launch(arrayOf("*/*")) },
+                                    enabled = !state.busy,
+                                    leading = { Icon(Icons.Filled.AttachFile, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                )
+                                val max = assignment.maxFileSubmissions
+                                if (max > 0) {
+                                    Spacer(Modifier.width(Spacing.md))
+                                    MetaText("${ui.files.size} / $max 件")
+                                }
+                            }
                         }
-                        val max = assignment.maxFileSubmissions
-                        if (max > 0) {
-                            MetaText("提出できるファイル: ${ui.files.size} / $max 件")
+                        if (assignment.supports("onlinetext") && canEdit) {
+                            Spacer(Modifier.height(Spacing.lg))
+                            OnlineTextEditor(
+                                state = state,
+                                ui = ui,
+                                onTextChange = viewModel::updateText,
+                                onSave = { viewModel.saveText() },
+                                onEditInMoodle = { onOpenMoodleWeb(webUrl, title) },
+                            )
                         }
                     }
 
@@ -289,9 +318,11 @@ fun AssignmentScreen(
                             confirmSubmit = true
                         },
                     )
-                    TextButton(onClick = { onOpenMoodleWeb(webUrl, title) }) {
-                        Text("Moodleでこの課題を開く")
-                    }
+                    TertiaryButton(
+                        "Moodleでこの課題を開く",
+                        onClick = { onOpenMoodleWeb(webUrl, title) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }
@@ -466,6 +497,8 @@ private fun OnlineTextEditor(
     onSave: () -> Unit,
     onEditInMoodle: () -> Unit,
 ) {
+    SubsectionTitle("提出する文章")
+    Spacer(Modifier.height(Spacing.sm))
     if (ui.onlineTextIsRich) {
         MessageBanner(
             "保存済みの文章に画像・表・リンクなどの書式が含まれています。" +
@@ -473,7 +506,8 @@ private fun OnlineTextEditor(
             isError = false,
             onDismiss = null,
         )
-        OutlinedButton(onClick = onEditInMoodle) { Text("Moodleで編集する") }
+        Spacer(Modifier.height(Spacing.sm))
+        SecondaryButton("Moodleで編集する", onClick = onEditInMoodle)
         return
     }
     OutlinedTextField(
@@ -485,74 +519,74 @@ private fun OnlineTextEditor(
         minLines = 6,
         enabled = !state.busy,
     )
-    Button(
+    SecondaryButton(
+        "提出内容を保存",
         onClick = onSave,
         enabled = !state.busy && state.isDirty,
-    ) { Text("提出内容を保存") }
+        modifier = Modifier.padding(top = Spacing.xs),
+    )
 }
 
 /**
- * 課題を開いてまず知りたい「いつまで」「今どういう状態か」を最上部に出す。
- * 箱で囲まず、大きな日時と状態の札だけ。色は意味色 (24時間以内 = 琥珀、期限切れ = 朱、提出済み = 緑) のみ。
+ * 課題を開いてまず知りたい「いつまで」「今どういう状態か」を最上部の状態カードに出す。
+ * 面の色調は意味色 (24時間以内 = 琥珀、期限切れ = 朱、提出済み = 緑、それ以外 = accent) で、札の文言と併用する。
  * 詳細な日付の一覧は [AssignmentDetails] に任せる。
  */
 @Composable
 private fun AssignmentStatusHero(assignment: Assignment, ui: AssignmentUiModel) {
-    val c = MaterialTheme.colorScheme
     val t = AppTheme.colors
-    // 状態色は面を塗らず文字色だけに使い、札の文言と併用する
-    val (accent, container, onContainer) = when (ui.availability) {
-        AssignmentAvailabilityLabel.DueSoon -> Triple(t.warning, t.surfaceSunken, t.warning)
-        AssignmentAvailabilityLabel.Overdue -> Triple(t.danger, t.surfaceSunken, t.danger)
+    val tone = when (ui.availability) {
+        AssignmentAvailabilityLabel.DueSoon -> Tone.Warning
+        AssignmentAvailabilityLabel.Overdue -> Tone.Danger
         AssignmentAvailabilityLabel.Submitted,
         AssignmentAvailabilityLabel.Graded,
-        -> Triple(t.success, t.surfaceSunken, t.success)
-        else -> Triple(c.onSurface, t.surfaceSunken, t.ink)
+        -> Tone.Success
+        else -> Tone.Accent
     }
+    val stateColor = toneColors(tone).second
     val nowSec = System.currentTimeMillis() / 1000
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        val remaining = assignment.duedate.takeIf { it > 0L && it >= nowSec }?.let { remainingLabel(nowSec, it) }
-        Text(
-            listOfNotNull("提出期限", remaining).joinToString(" · "),
-            style = MaterialTheme.typography.labelLarge,
-            color = c.onSurfaceVariant,
-        )
-        Text(
-            formatAssignmentTime(assignment.duedate),
-            style = MaterialTheme.typography.headlineSmall,
-            color = if (ui.availability == AssignmentAvailabilityLabel.DueSoon ||
-                ui.availability == AssignmentAvailabilityLabel.Overdue
-            ) {
-                accent
-            } else {
-                c.onSurface
-            },
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
-            StatusPill(ui.availability.text, containerColor = container, contentColor = onContainer)
-            // 「提出済み / 提出済み」のように同じ語が並ぶのを避ける
-            if (ui.submission.text != ui.availability.text) {
-                StatusPill(ui.submission.text)
-            }
-            if (ui.grading == AssignmentGradingLabel.Graded && ui.availability != AssignmentAvailabilityLabel.Graded) {
-                StatusPill(ui.grading.text)
-            }
+    val remaining = assignment.duedate.takeIf { it > 0L && it >= nowSec }?.let { remainingLabel(nowSec, it) }
+    StatusHeroCard(
+        tone = tone,
+        icon = Icons.Outlined.Schedule,
+        label = "提出期限",
+        value = formatAssignmentTime(assignment.duedate),
+        remaining = remaining,
+    ) {
+        HeroPill(ui.availability.text, color = stateColor)
+        // 「提出済み / 提出済み」のように同じ語が並ぶのを避ける
+        if (ui.submission.text != ui.availability.text) {
+            HeroPill(
+                ui.submission.text,
+                color = if (ui.submission == AssignmentSubmissionLabel.Submitted) t.success else t.ink,
+            )
+        }
+        if (ui.grading == AssignmentGradingLabel.Graded && ui.availability != AssignmentAvailabilityLabel.Graded) {
+            HeroPill(ui.grading.text, color = t.success)
         }
     }
 }
 
-/** 詳細は「ラベル 値」の行を余白で並べる。提出状況は最上部の札に出しているので繰り返さない */
+/** 詳細はアイコン付きの「ラベル … 値」の行。提出状況は最上部の札に出しているので繰り返さない */
 @Composable
 private fun AssignmentDetails(assignment: Assignment, ui: AssignmentUiModel) {
-    SubsectionTitle("詳細")
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SummaryLine("採点状況", ui.grading.text)
-        SummaryLine("提出可能期間", formatAssignmentTime(assignment.allowsubmissionsfromdate, suffix = " から"))
-        SummaryLine("締切 (受付終了)", formatAssignmentTime(assignment.cutoffdate))
-        if (ui.hasTimeLimit) SummaryLine("制限時間", formatDuration(assignment.timelimit))
-        SummaryLine("提出後の編集", if (ui.canEdit) "できる" else "できない")
+    DetailCard(title = "詳細", icon = Icons.Outlined.Info) {
+        InfoRow(Icons.AutoMirrored.Outlined.Grading, "採点状況", ui.grading.text)
+        CardDivider(inset = InfoRowTextInset)
+        InfoRow(Icons.Outlined.EventAvailable, "提出開始", formatAssignmentTime(assignment.allowsubmissionsfromdate, suffix = " から"))
+        CardDivider(inset = InfoRowTextInset)
+        InfoRow(Icons.Outlined.EventBusy, "受付終了", formatAssignmentTime(assignment.cutoffdate))
+        if (ui.hasTimeLimit) {
+            CardDivider(inset = InfoRowTextInset)
+            InfoRow(Icons.Outlined.Timer, "制限時間", formatDuration(assignment.timelimit))
+        }
+        CardDivider(inset = InfoRowTextInset)
+        InfoRow(Icons.Outlined.Edit, "提出後の編集", if (ui.canEdit) "できる" else "できない")
     }
 }
+
+/** 詳細カードの行の区切り線はアイコンの右から引く */
+private val InfoRowTextInset = 32.dp
 
 @Composable
 private fun AssignmentActions(
@@ -562,12 +596,18 @@ private fun AssignmentActions(
     onFinalSubmit: () -> Unit,
 ) {
     if (ui.actions.isEmpty()) return
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm), modifier = Modifier.padding(top = Spacing.sm)) {
         if (AssignmentAction.Start in ui.actions) {
-            Button(onClick = onStart, enabled = !busy) { Text("提出を開始 (計測開始)") }
+            PrimaryButton("提出を開始 (計測開始)", onClick = onStart, enabled = !busy, modifier = Modifier.fillMaxWidth())
         }
         if (AssignmentAction.FinalSubmit in ui.actions) {
-            Button(onClick = onFinalSubmit, enabled = !busy) { Text("最終提出する") }
+            PrimaryButton(
+                "最終提出する",
+                onClick = onFinalSubmit,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+                leading = { Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            )
         }
     }
 }
@@ -577,14 +617,17 @@ private fun SubmittedTextSection(ui: AssignmentUiModel, onOpenUrl: (String, Stri
     val text = ui.onlineText?.let(::htmlToPlainText)?.takeIf { it.isNotBlank() }
     if (text != null) {
         SubsectionTitle("提出した文章")
-        AppCard {
-            HtmlText(
-                html = ui.onlineText,
-                onOpenUrl = { onOpenUrl(it, "提出した文章") },
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(14.dp),
-            )
-        }
+        Spacer(Modifier.height(Spacing.sm))
+        HtmlText(
+            html = ui.onlineText,
+            onOpenUrl = { onOpenUrl(it, "提出した文章") },
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(AppTheme.colors.surfaceSunken, RoundedCornerShape(Radius.sm))
+                .padding(Spacing.md),
+        )
+        Spacer(Modifier.height(Spacing.md))
     }
 }
 
@@ -595,9 +638,12 @@ private fun IntroAttachmentsSection(
     onDownloadFile: (SubmittedFileUi) -> Unit,
 ) {
     if (attachments.isEmpty()) return
-    SubsectionTitle("課題の添付ファイル")
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        attachments.forEach { file ->
+    DetailCard(
+        title = "課題の添付ファイル",
+        icon = Icons.Filled.AttachFile,
+        trailing = { MetaText("${attachments.size}件") },
+    ) {
+        attachments.forEachIndexed { index, file ->
             val ui = SubmittedFileUi(
                 filename = file.filename,
                 filepath = "/",
@@ -608,7 +654,8 @@ private fun IntroAttachmentsSection(
                 mimeType = file.mimetype,
                 previewKind = previewKindFor(file.filename, file.mimetype),
             )
-            FileCard(ui, canRemove = false, onOpenFilePreview, onDownloadFile, onRemoveFile = {})
+            if (index > 0) CardDivider(inset = FileTextInset)
+            FileItem(ui, canRemove = false, onOpenFilePreview, onDownloadFile, onRemoveFile = {})
         }
     }
 }
@@ -623,22 +670,34 @@ private fun SubmittedFilesSection(
 ) {
     SubsectionTitle("提出したファイル")
     if (files.isEmpty()) {
-        Text(
-            "ファイル提出はありません",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = Spacing.sm)) {
+            IconTile(Icons.Outlined.FolderOpen, size = 32.dp, iconSize = 18.dp)
+            Spacer(Modifier.width(Spacing.md))
+            Text(
+                "まだファイルを提出していません",
+                style = MaterialTheme.typography.bodyMedium,
+                color = AppTheme.colors.inkSecondary,
+            )
+        }
         return
     }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        files.forEach { file ->
-            FileCard(file, canRemove, onOpenFilePreview, onDownloadFile, onRemoveFile)
-        }
+    files.forEachIndexed { index, file ->
+        if (index > 0) CardDivider(inset = FileTextInset)
+        FileItem(file, canRemove, onOpenFilePreview, onDownloadFile, onRemoveFile)
     }
 }
 
+/** ファイル行の本文の開始位置 (種類のタイルの分)。区切り線もここから引く */
+private val FileTextInset = 40.dp + Spacing.md
+
+private fun fileIcon(kind: PreviewKind) = when (kind) {
+    PreviewKind.Pdf -> Icons.Outlined.PictureAsPdf
+    PreviewKind.Image -> Icons.Outlined.Image
+    else -> Icons.Outlined.Description
+}
+
 @Composable
-private fun FileCard(
+private fun FileItem(
     file: SubmittedFileUi,
     canRemove: Boolean,
     onOpenFilePreview: (SubmittedFileUi) -> Unit,
@@ -647,47 +706,50 @@ private fun FileCard(
 ) {
     val hasSource = !file.sourceUrl.isNullOrBlank()
     val canPreview = file.previewKind != PreviewKind.Unsupported && file.previewKind != PreviewKind.Html && hasSource
-    AppCard {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LeadingIcon(
-                    icon = if (file.previewKind == PreviewKind.Pdf) Icons.Filled.PictureAsPdf else Icons.Filled.Description,
-                    contentDescription = null,
-                )
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(file.filename, style = MaterialTheme.typography.titleSmall, maxLines = 2)
-                    // ファイル名の下にメタ情報を1行にまとめ、個別行で並べない
-                    MetaText(
-                        listOf(file.typeLabel, formatBytes(file.sizeBytes), formatAssignmentTime(file.modifiedAt))
-                            .joinToString(" · "),
-                    )
-                    if (file.filepath != "/") MetaText("フォルダ: ${file.filepath}")
-                }
-            }
-            if (!canPreview) {
+    // 下の余白は操作ボタンの高さ (48) が担う
+    Column(Modifier.padding(top = Spacing.md)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 赤・緑は状態 (期限切れ・提出済み) 専用なので、種類はアイコンの形で見分ける
+            IconTile(fileIcon(file.previewKind), tone = Tone.Accent)
+            Spacer(Modifier.width(Spacing.md))
+            Column(Modifier.weight(1f)) {
                 Text(
-                    previewLabel(file.previewKind),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    file.filename,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = AppTheme.colors.ink,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                // ファイル名の下にメタ情報を1行にまとめ、個別行で並べない
+                MetaText(
+                    listOf(file.typeLabel, formatBytes(file.sizeBytes), formatAssignmentTime(file.modifiedAt))
+                        .joinToString(" · "),
+                )
+                if (file.filepath != "/") MetaText("フォルダ: ${file.filepath}")
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (canPreview) {
-                    Button(onClick = { onOpenFilePreview(file) }) { Text("プレビュー") }
-                }
-                if (hasSource) {
-                    OutlinedButton(onClick = { onDownloadFile(file) }) { Text("ダウンロード") }
-                }
-                if (canRemove) {
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { onRemoveFile(file) }) {
-                        Text("削除", color = MaterialTheme.colorScheme.error)
-                    }
-                }
+        }
+        if (!canPreview) {
+            Text(
+                previewLabel(file.previewKind),
+                style = MaterialTheme.typography.bodySmall,
+                color = AppTheme.colors.inkSecondary,
+                modifier = Modifier.padding(start = FileTextInset, top = Spacing.xs),
+            )
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+            modifier = Modifier.padding(start = FileTextInset - Spacing.md, top = Spacing.xs),
+        ) {
+            if (canPreview) {
+                TertiaryButton("プレビュー", onClick = { onOpenFilePreview(file) })
+            }
+            if (hasSource) {
+                TertiaryButton("ダウンロード", onClick = { onDownloadFile(file) })
+            }
+            if (canRemove) {
+                Spacer(Modifier.weight(1f))
+                TertiaryButton("削除", onClick = { onRemoveFile(file) }, destructive = true)
             }
         }
     }
@@ -701,20 +763,29 @@ private fun FeedbackBlock(status: SubmissionStatusResponse, onOpenUrl: (String, 
         ?.firstOrNull { it.text.isNotBlank() }
         ?.text
     if (grade != null || !feedback.isNullOrBlank()) {
-        SubsectionTitle("評価・フィードバック")
-        AppCard {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (grade != null) {
-                    Text("評価", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(grade, style = MaterialTheme.typography.headlineSmall)
-                }
-                if (!feedback.isNullOrBlank()) {
-                    HtmlText(
-                        html = feedback,
-                        onOpenUrl = { onOpenUrl(it, "評価・フィードバック") },
-                        style = MaterialTheme.typography.bodyMedium,
+        DetailCard(title = "評価・フィードバック", icon = Icons.Outlined.Grade) {
+            if (grade != null) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(AppTheme.colors.successSoft, RoundedCornerShape(Radius.sm))
+                        .padding(Spacing.md),
+                ) {
+                    Text("評価", style = MaterialTheme.typography.labelLarge, color = AppTheme.colors.success)
+                    Text(
+                        grade,
+                        style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = "tnum"),
+                        color = AppTheme.colors.ink,
                     )
                 }
+            }
+            if (!feedback.isNullOrBlank()) {
+                if (grade != null) Spacer(Modifier.height(Spacing.md))
+                HtmlText(
+                    html = feedback,
+                    onOpenUrl = { onOpenUrl(it, "評価・フィードバック") },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
             }
         }
     }
