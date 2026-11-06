@@ -55,7 +55,7 @@ better_moodle_app を Kotlin Multiplatform 化して iOS に対応させるた�
 ## Phase 0: Android版の安定化と移行準備
 
 KMP化前にAndroid内で土台を固める。**全作業Windowsで完結。**
-詳細な問題点と完了条件は [PROJECT_REVIEW.md](PROJECT_REVIEW.md) (F01–F16) を正とする。
+詳細な問題点と完了条件は [PROJECT_REVIEW.md](docs/audits/PROJECT_REVIEW.md) (F01–F16) を正とする。
 
 1. **CIの整備** (済): GitHub Actions で `testDebugUnitTest` + `lintDebug` + `assembleDebug` を全push/PRで実行。
 2. **提出フローの修復** (実装・JVMテスト済、結合・実機未): `assignmentid` 契約、通常/制限時間付き課題の区別、warning判定、
@@ -67,11 +67,11 @@ KMP化前にAndroid内で土台を固める。**全作業Windowsで完結。**
 4. **閲覧・通信** (実装済、実機未): ACTION_VIEW優先の外部起動、「Moodleで開く」導線、シラバス失敗理由の区別、
    本文読み取りまで中断できるHTTP (`Call.useResponse`、全経路)、WebViewの破棄・エラー復旧・SSO戻る/タイムアウト。
 5. **実機受入** (未): PROJECT_REVIEW.md のチェックリストを実端末・テスト用課題で通す。
-6. **ツールチェーン更新** (未): Kotlin 2.0.21 → 最新stable、AGP・Compose BOM追随。
+6. **ツールチェーン更新** (一部済): AGP 9.4.1 / Gradle 9.6.0 / Kotlin 2.2.10 / API 36 へ更新済み。Compose BOM と AGP の新 DSL への移行は未。
    一括更新はせず互換性を確認しながら段階的に。Track A の場合は Compose Multiplatform 対応版に合わせる。
 7. **残項目** (未): `rutime_table` 実HTMLでの解析検証、閲覧完了APIの実装、フォーラムのBack整合、PDF巨大ページ対策。
 
-**DoD**: CIがグリーン (ローカルでは達成、GitHub上の実行実績は未)。実機でログイン→時間割→締切→課題提出 (既存A+追加B保持) が通る (未達)。
+**DoD**: CIがグリーン (達成)。実機でログイン→時間割→締切→課題提出 (既存A+追加B保持) が通る (未達)。
 
 ## Phase 1: appモジュール内でのKMP互換化 (リスク最小の下準備)
 

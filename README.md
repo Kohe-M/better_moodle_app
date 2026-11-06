@@ -4,15 +4,16 @@
 
 公式Moodleアプリの「時間割が一覧で見えない」「通知がごちゃまぜ」という課題を解決する。
 
+開発のルールは [AGENTS.md](AGENTS.md) と [docs/CONVENTIONS.md](docs/CONVENTIONS.md)、デザインは [DESIGN.md](DESIGN.md)。
+
 ## 機能
 
 | タブ | 内容 |
 |------|------|
-| 時間割 | ダッシュボードの時間割ブロックを解析し、**スクロール不要の全画面グリッド**で表示。今日の曜日をハイライト。コマをタップするとコース/シラバスへ |
-| 締切 | **課題(assign)・小テスト(quiz)等の締切だけ**を日付ごとにまとめた一覧。24時間以内は赤で強調 |
-| 通知 | Moodleの通知一覧。「課題関連 / その他」フィルタ付き |
-| シラバス | 履修中コース一覧から1タップでシラバスを開く。授業コード直接入力も可 |
-| ポータル | スチューデントポータル (sp.ritsumei.ac.jp) をアプリ内WebViewで表示。Microsoft SSOのセッションは永続化 |
+| 今日 | 今と次の授業 (Now Card)、今日の授業、直近の締切。右上から通知へ |
+| 時間割 | ダッシュボードの時間割ブロックを解析し、**スクロール不要の全画面グリッド**で表示。今日の曜日をハイライト。コマをタップするとコースへ |
+| 課題 | **課題(assign)・小テスト(quiz)等の締切だけ**をまとめた一覧。アプリ内の完了チェック付き |
+| コース | 履修コースの検索と一覧。シラバス、スチューデントポータル (アプリ内WebView) への入口。右上から設定へ |
 
 さらに **WorkManager** が6時間ごとに締切をチェックし、24時間以内に迫った課題をローカル通知する
 (ページ上限やサーバー応答の異常で 24 時間分を取り切れなかった場合は取得できた分だけ通知し、通知済み記録は削らない)。
@@ -21,14 +22,17 @@
 
 Android Studio でこのフォルダを開いて Run するだけ。CLIの場合:
 
-```
+```bash
 JAVA_HOME="C:/Program Files/Java/jdk-17" ./gradlew assembleDebug
+```
+
+```bash
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-- **JDK 17 が必要** (CI と同じ)。Android Studio 同梱 JBR が Java 25 の環境では Gradle 8.13 が起動時に失敗する
-- AGP 8.13.2 / Gradle 8.13 / minSdk 26 / targetSdk 35 / Kotlin 2.0 + Jetpack Compose (Material 3)
-- DIフレームワークなし (`AppContainer` による手動DI)、DB なし (DataStore のみ) の軽量構成
+- **JDK 17 を使う** (CI と同じ)
+- AGP 9.4.1 / Gradle 9.6.0 / minSdk 26 / targetSdk 36 / Kotlin 2.2.10 + Jetpack Compose (Material 3)
+- DIフレームワークなし (`AppContainer` による手動DI)、DB なし (DataStore、SharedPreferences、暗号化した下書きファイル) の軽量構成
 
 ## アーキテクチャと調査結果
 
@@ -38,7 +42,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 1. `admin/tool/mobile/launch.php?service=moodle_mobile_app&passport={乱数}&urlscheme=bettermoodle` をアプリ内WebViewで開く
 2. 学内SSO (Azure AD / Microsoft学生アカウント) でログイン
-3. `bettermoodle://token=BASE64("md5(siteUrl+passport):::wstoken[:::privatetoken]")` へのリダイレクトを `shouldOverrideUrlLoading` で捕捉してトークン保存 ([SsoLogin.kt](app/src/main/java/dev/rits/bettermoodle/auth/SsoLogin.kt))
+3. `moodlemobile://token=BASE64("md5(siteUrl+passport):::wstoken[:::privatetoken]")` へのリダイレクトを捕捉してトークン保存 ([SsoLogin.kt](app/src/main/java/dev/rits/bettermoodle/auth/SsoLogin.kt))。サイト側の設定で `urlscheme` の指定によらず `moodlemobile` で届く。WebView がリダイレクトを捨てる場合に備え、`launch.php` を直接叩くプローブも併用する
 
 以後は `POST /webservice/rest/server.php` (`wstoken` + `wsfunction`) で全データを取得 ([MoodleClient.kt](app/src/main/java/dev/rits/bettermoodle/data/MoodleClient.kt))。
 
@@ -105,7 +109,7 @@ API化する場合はWebViewのセッションCookie (`sid`) を使って `sfsit
 - [x] 通知の既読同期 (`core_message_mark_notification_read`)
 - [x] Moodle Web Service token のAndroid Keystore暗号化保存
 - [x] CI (GitHub Actions: 単体テスト・Lint・assembleDebug)
-- [ ] 実機での受入テスト ([PROJECT_REVIEW.md](PROJECT_REVIEW.md) のチェックリスト)
+- [ ] 実機での受入テスト ([PROJECT_REVIEW.md](docs/audits/PROJECT_REVIEW.md) のチェックリスト)
 - [ ] Google Play 配信するなら大学への確認を推奨 (非公式ツールのため)
 
 ## 免責
