@@ -8,7 +8,7 @@
 |---|---|---|
 | DI | `App.kt` の `AppContainer` | 手動 DI。画面は `container` を引数で受ける |
 | 画面 | `ui/*Screen.kt` | Repository を直接呼ぶ。読み込みは `rememberLoadable`。ViewModel は課題画面だけ |
-| 遷移 | `MainActivity.kt` | ルートはすべてここに定義する |
+| 遷移 | `Routes.kt`、`MainActivity.kt` | ルートのパターン、組み立て、URL からの解決は `Routes` にすべて置く。NavHost は `MainActivity.kt` |
 | 純ロジック | `data/` | Android API に依存させない。例外は `SessionStore`、`LocalPreferences`、`KeystoreCrypto` |
 | 共通 UI | `ui/Common.kt`、`ui/Motif.kt`、`ui/Formats.kt` | 新しく作る前にここを探す |
 
@@ -102,7 +102,7 @@ ID の取り違えに注意する:
 
 - 受け入れる URL はすべて `data/UrlPolicy.kt` で判定する。外から来た URL は先に `normalizeMoodleUrl` を通す
 - ファイル URL へのトークン付与は `appendMoodleToken` だけ。秘密パラメータ付きの URL は WebView にも外部アプリにも渡らないようになっている
-- ルート引数は `Uri.encode` する
+- ルート文字列は `Routes` の関数で組み立てる。引数は `Uri.encode` する。テストではエンコーダを差し替える。`URLEncoder` に置き換えると空白や記号の扱いが変わる
 - 利用者の操作からの遷移は `navigateFromUser`。遷移中の二重タップを捨てるため
 - 通知からの遷移では `navigateFromUser` を使わない。起動直後は RESUMED でないので宛先が捨てられる
 - 通知タップの宛先は「遷移、消費済みの記録、クリア」の順に処理する (G10)
