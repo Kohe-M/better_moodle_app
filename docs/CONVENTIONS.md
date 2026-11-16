@@ -10,12 +10,23 @@
 | 画面 | `ui/*Screen.kt` | Repository を直接呼ぶ。読み込みは `rememberLoadable`。ViewModel は課題画面だけ |
 | 遷移 | `Routes.kt`、`MainActivity.kt` | ルートのパターン、組み立て、URL からの解決は `Routes` にすべて置く。NavHost は `MainActivity.kt` |
 | 純ロジック | `data/` | Android API に依存させない。例外は `SessionStore`、`LocalPreferences`、`KeystoreCrypto` |
-| 共通 UI | `ui/Common.kt`、`ui/Motif.kt`、`ui/Formats.kt` | 新しく作る前にここを探す |
+| 共通 UI | 下の表の `ui/` のファイル、`ui/Motif.kt`、`ui/Formats.kt` | 新しく作る前にここを探す |
 
 - `data/` を Android から離しておくのは、JVM テストと KMP 移行 ([ROADMAP.md](../ROADMAP.md)) のため
 - I/O は interface で差し替える: `AuthTokenStore`、`AssignmentGateway`、`DraftStateStore`、`DraftCodec`、`SyllabusUrlCache`
 - 現在時刻は引数で受ける (`nowEpochSeconds`、`today`)。テストで固定するため
 - UI 文言は Kotlin に直接書く。`strings.xml` はアプリ名だけ
+
+共通 UI の置き場所 (パッケージはすべて `dev.rits.bettermoodle.ui`):
+
+| ファイル | 中身 |
+|---|---|
+| `UiState.kt` | `UiState` と `isRefreshing`、`isStale` |
+| `StatusViews.kt` | `StaleDataBanner`、`SyncFooter`、`LoadingBox`、`ErrorBox`、`EmptyBox`、`MessageBanner`、`LoadMoreRow` |
+| `Cards.kt` | 余白の定数 (`ScreenGutter` など)、`AppCard`、`ListRow`、`RowDivider`、`IconTile`、`DetailCard`、`InfoRow`、`DetailTitle`、`StatusHeroCard`、`HeroPill`、`GroupPosition`、`groupedItem` |
+| `Labels.kt` | `SectionLabel`、`SectionHeading`、`SubsectionTitle`、`MetaText`、`StatusPill`、`Tone`、`toneColors` |
+| `Buttons.kt` | `PrimaryButton`、`SecondaryButton`、`TertiaryButton`、`ConfirmSheet` |
+| `Common.kt` | トップバーの色、`rememberIsOnline`、`openInCustomTab` |
 
 ## 認証とセッション
 
