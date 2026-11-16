@@ -8,7 +8,7 @@
 
 | DESIGN.md | 実装 |
 |---|---|
-| §2 タブ (今日/時間割/課題/コース) | `MainActivity.MainTabs`。通知は今日タブ右上、設定はコースタブ右上、シラバス・ポータルはコースタブ内の行から push |
+| §2 タブ (今日/時間割/課題/コース) | `MainTabs.kt` の `MainTabs`。通知は今日タブ右上、設定はコースタブ右上、シラバス・ポータルはコースタブ内の行から push |
 | §3 授業カラー (ハッシュ mod 10・隣接ずらし・利用者変更) | `data/CourseColors.kt` (純ロジック)、`data/LocalPreferences.kt` の `CourseColorStore`、`ui/Motif.kt` の `courseColor()`。変更はコース詳細の色スクエアから |
 | §7 スケルトン (300ms 未満は何も出さない) | `SkeletonList` / `LoadingBox` |
 | §8.1 Now Card | `ui/TodayScreen.kt` + `data/TimetableFocus.kt` の `nowCardState` |
