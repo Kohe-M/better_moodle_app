@@ -1,7 +1,7 @@
 package dev.rits.bettermoodle
 
 import dev.rits.bettermoodle.data.Course
-import dev.rits.bettermoodle.data.MoodleRepository
+import dev.rits.bettermoodle.data.TimetableParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -36,7 +36,7 @@ class TimetableParserTest {
 
     @Test
     fun `時間割HTMLを解析できる`() {
-        val timetable = MoodleRepository.parseTimetableHtml(html)
+        val timetable = TimetableParser.parse(html)
         assertEquals(3, timetable.entries.size)
 
         val mon1 = timetable.entries.first { it.dayIndex == 0 && it.period == 1 }
@@ -67,7 +67,7 @@ class TimetableParserTest {
             </table>
         """.trimIndent()
 
-        val timetable = MoodleRepository.parseTimetableHtml(htmlWithDayOfWeekHeaders)
+        val timetable = TimetableParser.parse(htmlWithDayOfWeekHeaders)
 
         assertEquals(5, timetable.entries.size)
         (0..4).forEach { dayIndex ->
@@ -79,7 +79,7 @@ class TimetableParserTest {
 
     @Test
     fun `空HTMLは空の時間割を返す`() {
-        val timetable = MoodleRepository.parseTimetableHtml("<div>no table</div>")
+        val timetable = TimetableParser.parse("<div>no table</div>")
         assertTrue(timetable.entries.isEmpty())
     }
 
@@ -93,8 +93,8 @@ class TimetableParserTest {
     @Test
     fun `教室文字列から現在の曜日時限だけを抽出できる`() {
         val rooms = "月1: A101 火2: B202 月3: C303"
-        assertEquals("A101", MoodleRepository.extractRoomForSlot(rooms, dayIdx = 0, period = 1))
-        assertEquals("B202", MoodleRepository.extractRoomForSlot(rooms, dayIdx = 1, period = 2))
-        assertNull(MoodleRepository.extractRoomForSlot(rooms, dayIdx = 2, period = 1))
+        assertEquals("A101", TimetableParser.extractRoomForSlot(rooms, dayIdx = 0, period = 1))
+        assertEquals("B202", TimetableParser.extractRoomForSlot(rooms, dayIdx = 1, period = 2))
+        assertNull(TimetableParser.extractRoomForSlot(rooms, dayIdx = 2, period = 1))
     }
 }

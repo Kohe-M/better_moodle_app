@@ -82,7 +82,7 @@ ID の取り違えに注意する:
 
 課題 API は引数名も違う: 取得と開始は `assignid`、保存と最終提出は `assignmentid` (F01)。
 
-時間割はダッシュボードのカスタムブロック `rutime_table` の HTML を jsoup で解析する。コース名は `12345:科目名 §クラス` の形式で、先頭 5 桁が授業コード。
+時間割はダッシュボードのカスタムブロック `rutime_table` の HTML を jsoup で解析する。取得は `MoodleRepository.timetable()`、解析は `data/TimetableParser.kt` の純関数。コース名は `12345:科目名 §クラス` の形式で、先頭 5 桁が授業コード。
 
 ## SSO
 
