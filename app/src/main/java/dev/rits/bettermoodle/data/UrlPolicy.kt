@@ -143,4 +143,18 @@ object UrlPolicy {
         )
     }
 
+    /**
+     * Logcat用 (DEBUGのみ): http(s) はスキーム+ホスト+パス、それ以外はスキームだけ。
+     * クエリ・フラグメント・userinfo・ポートは出さない (トークンや SSO の署名がログに残らないように)。
+     */
+    fun debugLabel(url: String): String {
+        val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return "(unparseable)"
+        val scheme = uri.scheme?.lowercase() ?: return "(no-scheme)"
+        return if (scheme == "http" || scheme == "https") {
+            "$scheme://${uri.host.orEmpty()}${uri.path.orEmpty()}"
+        } else {
+            "$scheme://"
+        }
+    }
+
 }

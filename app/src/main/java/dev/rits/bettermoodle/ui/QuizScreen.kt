@@ -246,7 +246,7 @@ private fun QuizStatusHero(quiz: Quiz, access: QuizAccessInformationResponse, be
         tone = tone,
         icon = Icons.Outlined.Schedule,
         label = "受付終了",
-        value = formatQuizTime(quiz.timeclose),
+        value = formatMoodleDateTime(quiz.timeclose),
         remaining = remaining,
     ) {
         HeroPill(
@@ -262,7 +262,7 @@ private fun QuizStatusHero(quiz: Quiz, access: QuizAccessInformationResponse, be
 @Composable
 private fun QuizSummaryCard(quiz: Quiz, bestGrade: QuizBestGradeResponse) {
     DetailCard(title = "詳細", icon = Icons.Outlined.Info) {
-        InfoRow(Icons.Outlined.EventAvailable, "受験開始", formatQuizTime(quiz.timeopen))
+        InfoRow(Icons.Outlined.EventAvailable, "受験開始", formatMoodleDateTime(quiz.timeopen))
         CardDivider(inset = 32.dp)
         InfoRow(Icons.Outlined.Timer, "制限時間", quizTimeLimitLabel(quiz.timelimit))
         CardDivider(inset = 32.dp)
@@ -314,7 +314,7 @@ private fun QuizAttemptsCard(attempts: List<QuizAttempt>) {
                 Spacer(Modifier.width(Spacing.md))
                 Column(Modifier.weight(1f)) {
                     Text("${attempt.attempt}回目", style = MaterialTheme.typography.titleSmall, color = AppTheme.colors.ink)
-                    MetaText("終了 ${formatQuizTime(attempt.timefinish)}")
+                    MetaText("終了 ${formatMoodleDateTime(attempt.timefinish)}")
                 }
                 val state = quizAttemptStateLabel(attempt.state)
                 StatusPill(
@@ -412,6 +412,3 @@ private fun QuizDiagnostic.toSafeText(): String = buildString {
     appendLine("contextId=${target.contextId ?: "-"}")
     appendLine("modName=${target.modName}")
 }
-
-private fun formatQuizTime(epochSeconds: Long): String =
-    formatMoodleDateTime(epochSeconds)

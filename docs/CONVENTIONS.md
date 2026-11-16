@@ -50,7 +50,7 @@
 - ファイル取得は `MoodleClient.fetchFile` か `downloadToFile` を通す。HTML やエラー JSON をファイルとして扱わないため (G12)
 - `CancellationException` を握りつぶさない (G13)。`runCatching` と `catch (e: Exception)` はキャンセルも捕まえるので、先に再送出する
 - 共有クライアントに Cookie を持たせない。シラバス API は Cookie があると `invalid_csrf` になる
-- ログは `BuildConfig.DEBUG` の中でだけ出す。URL は scheme、host、path まで。トークンとクエリは出さない
+- ログは `BuildConfig.DEBUG` の中でだけ出す。URL は `UrlPolicy.debugLabel` を通して scheme、host、path までにする。トークンとクエリは出さない
 
 ```kotlin
 try {

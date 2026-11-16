@@ -43,23 +43,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.net.URI
 
 private const val LOGIN_POLLING_TIMEOUT_MILLIS = 10 * 60 * 1000L
 
 /** SSO中の launch.php 定期確認の間隔。主経路は「lmsへ戻ったときの確認」で、これは補助 (サーバー負荷を抑える) */
 private const val LOGIN_POLLING_INTERVAL_MILLIS = 5_000L
-
-/** Logcat用 (DEBUGのみ): スキーム+ホスト+パスのみ。クエリ・フラグメントは出さない。 */
-private fun loginDebugUrlLabel(url: String): String {
-    val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return "(unparseable)"
-    val scheme = uri.scheme?.lowercase() ?: return "(no-scheme)"
-    return if (scheme == "http" || scheme == "https") {
-        "$scheme://${uri.host.orEmpty()}${uri.path.orEmpty()}"
-    } else {
-        "$scheme://"
-    }
-}
 
 /**
  * ログイン画面。
@@ -205,7 +193,7 @@ fun LoginScreen(onToken: suspend (SsoLogin.Tokens) -> Boolean) {
                             if (BuildConfig.DEBUG) {
                                 android.util.Log.d(
                                     "LoginWeb",
-                                    "navigate ${if (allowed) "allow" else "block"}: ${loginDebugUrlLabel(url)}",
+                                    "navigate ${if (allowed) "allow" else "block"}: ${UrlPolicy.debugLabel(url)}",
                                 )
                             }
                             return !allowed
@@ -217,7 +205,7 @@ fun LoginScreen(onToken: suspend (SsoLogin.Tokens) -> Boolean) {
                             favicon: android.graphics.Bitmap?,
                         ) {
                             if (BuildConfig.DEBUG && url != null) {
-                                android.util.Log.d("LoginWeb", "pageStarted: ${loginDebugUrlLabel(url)}")
+                                android.util.Log.d("LoginWeb", "pageStarted: ${UrlPolicy.debugLabel(url)}")
                             }
                             if (handleTokenUrl(url)) view?.stopLoading()
                         }
@@ -225,7 +213,7 @@ fun LoginScreen(onToken: suspend (SsoLogin.Tokens) -> Boolean) {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             val current = url ?: return
                             if (BuildConfig.DEBUG) {
-                                android.util.Log.d("LoginWeb", "pageFinished: ${loginDebugUrlLabel(current)}")
+                                android.util.Log.d("LoginWeb", "pageFinished: ${UrlPolicy.debugLabel(current)}")
                             }
                             if (tokenDelivered || probing) return
                             // カスタムスキームへの302はWebViewがコールバックなしに破棄する

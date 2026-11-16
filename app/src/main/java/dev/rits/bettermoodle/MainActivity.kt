@@ -58,7 +58,6 @@ import dev.rits.bettermoodle.ui.SubScreenScaffold
 import dev.rits.bettermoodle.ui.theme.AppTheme
 import dev.rits.bettermoodle.work.DeadlineWorker
 import kotlinx.coroutines.launch
-import java.net.URI
 
 class MainActivity : ComponentActivity() {
 
@@ -416,18 +415,7 @@ private fun NavBackStackEntry.savedCode(): String? =
 
 private fun showUnhandledUrl(context: Context, url: String) {
     if (BuildConfig.DEBUG) {
-        Log.d("OpenUrl", "unhandled: ${debugUrlLabel(url)}")
+        Log.d("OpenUrl", "unhandled: ${UrlPolicy.debugLabel(url)}")
     }
     Toast.makeText(context, "このリンクは開けません", Toast.LENGTH_SHORT).show()
-}
-
-/** Logcat用 (DEBUGのみ): クエリ・フラグメントは含めない。 */
-private fun debugUrlLabel(url: String): String {
-    val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return "(unparseable)"
-    val scheme = uri.scheme?.lowercase() ?: return "(no-scheme)"
-    return if (scheme == "http" || scheme == "https") {
-        "$scheme://${uri.host.orEmpty()}${uri.path.orEmpty()}"
-    } else {
-        "$scheme://"
-    }
 }

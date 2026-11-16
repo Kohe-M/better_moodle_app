@@ -464,7 +464,7 @@ private fun PostBlock(post: ForumPost, isRoot: Boolean, onOpenUrl: (String, Stri
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    MetaText(formatTime(post.timecreated))
+                    MetaText(formatMoodleDateTime(post.timecreated))
                 }
             }
             HtmlText(
@@ -476,6 +476,3 @@ private fun PostBlock(post: ForumPost, isRoot: Boolean, onOpenUrl: (String, Stri
         }
     }
 }
-
-private fun formatTime(epochSeconds: Long): String =
-    formatMoodleDateTime(epochSeconds)

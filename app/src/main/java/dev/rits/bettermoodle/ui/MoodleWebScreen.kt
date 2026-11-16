@@ -134,7 +134,7 @@ fun MoodleWebScreen(
                                         if (request == null || !request.isForMainFrame) return false
                                         val target = request.url?.toString() ?: return true
                                         if (BuildConfig.DEBUG) {
-                                            Log.d("MoodleWeb", "navigate: ${debugUrlLabel(target)}")
+                                            Log.d("MoodleWeb", "navigate: ${UrlPolicy.debugLabel(target)}")
                                         }
                                         // ログインリダイレクト (Moodle→SSO) を通すため、SSO許可リストで判定する。
                                         if (UrlPolicy.isAllowedSsoWebViewUrl(target)) return false
@@ -251,17 +251,6 @@ private fun safeUrlLabel(url: String): String {
     val scheme = uri.scheme?.lowercase() ?: return "不明なURL"
     return if (scheme == "http" || scheme == "https") {
         "$scheme://${uri.host.orEmpty()}"
-    } else {
-        "$scheme://"
-    }
-}
-
-/** Logcat用 (DEBUGのみ): クエリ・フラグメントは含めない。 */
-private fun debugUrlLabel(url: String): String {
-    val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return "(unparseable)"
-    val scheme = uri.scheme?.lowercase() ?: return "(no-scheme)"
-    return if (scheme == "http" || scheme == "https") {
-        "$scheme://${uri.host.orEmpty()}${uri.path.orEmpty()}"
     } else {
         "$scheme://"
     }

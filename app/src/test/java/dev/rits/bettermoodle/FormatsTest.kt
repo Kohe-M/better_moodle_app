@@ -52,4 +52,12 @@ class FormatsTest {
             formatMoodleDateTime(epochSeconds = 0L, now = Instant.EPOCH, zoneId = zoneId),
         )
     }
+
+    @Test
+    fun `unset date drops the suffix`() {
+        assertEquals(
+            "未設定",
+            formatMoodleDateTime(epochSeconds = -1L, suffix = " から", now = now, zoneId = zoneId),
+        )
+    }
 }

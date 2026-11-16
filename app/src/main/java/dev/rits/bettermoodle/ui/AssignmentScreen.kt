@@ -550,7 +550,7 @@ private fun AssignmentStatusHero(assignment: Assignment, ui: AssignmentUiModel) 
         tone = tone,
         icon = Icons.Outlined.Schedule,
         label = "提出期限",
-        value = formatAssignmentTime(assignment.duedate),
+        value = formatMoodleDateTime(assignment.duedate),
         remaining = remaining,
     ) {
         HeroPill(ui.availability.text, color = stateColor)
@@ -573,9 +573,9 @@ private fun AssignmentDetails(assignment: Assignment, ui: AssignmentUiModel) {
     DetailCard(title = "詳細", icon = Icons.Outlined.Info) {
         InfoRow(Icons.AutoMirrored.Outlined.Grading, "採点状況", ui.grading.text)
         CardDivider(inset = InfoRowTextInset)
-        InfoRow(Icons.Outlined.EventAvailable, "提出開始", formatAssignmentTime(assignment.allowsubmissionsfromdate, suffix = " から"))
+        InfoRow(Icons.Outlined.EventAvailable, "提出開始", formatMoodleDateTime(assignment.allowsubmissionsfromdate, suffix = " から"))
         CardDivider(inset = InfoRowTextInset)
-        InfoRow(Icons.Outlined.EventBusy, "受付終了", formatAssignmentTime(assignment.cutoffdate))
+        InfoRow(Icons.Outlined.EventBusy, "受付終了", formatMoodleDateTime(assignment.cutoffdate))
         if (ui.hasTimeLimit) {
             CardDivider(inset = InfoRowTextInset)
             InfoRow(Icons.Outlined.Timer, "制限時間", formatDuration(assignment.timelimit))
@@ -722,7 +722,7 @@ private fun FileItem(
                 )
                 // ファイル名の下にメタ情報を1行にまとめ、個別行で並べない
                 MetaText(
-                    listOf(file.typeLabel, formatBytes(file.sizeBytes), formatAssignmentTime(file.modifiedAt))
+                    listOf(file.typeLabel, formatBytes(file.sizeBytes), formatMoodleDateTime(file.modifiedAt))
                         .joinToString(" · "),
                 )
                 if (file.filepath != "/") MetaText("フォルダ: ${file.filepath}")
@@ -790,9 +790,6 @@ private fun FeedbackBlock(status: SubmissionStatusResponse, onOpenUrl: (String, 
         }
     }
 }
-
-private fun formatAssignmentTime(epochSeconds: Long, suffix: String = ""): String =
-    formatMoodleDateTime(epochSeconds, suffix)
 
 private fun formatDuration(seconds: Long): String {
     if (seconds <= 0L) return "なし"

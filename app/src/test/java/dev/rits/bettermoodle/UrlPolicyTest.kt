@@ -10,6 +10,27 @@ import org.junit.Test
 class UrlPolicyTest {
 
     @Test
+    fun `debug label keeps only scheme host and path`() {
+        assertEquals(
+            "https://lms.ritsumei.ac.jp/webservice/pluginfile.php/1/a.pdf",
+            UrlPolicy.debugLabel(" HTTPS://user:pw@lms.ritsumei.ac.jp:8443/webservice/pluginfile.php/1/a.pdf?token=secret#frag "),
+        )
+        assertEquals("http://example.com", UrlPolicy.debugLabel("http://example.com?wstoken=secret"))
+    }
+
+    @Test
+    fun `debug label hides everything after a custom scheme`() {
+        assertEquals("moodlemobile://", UrlPolicy.debugLabel("moodlemobile://token=c2VjcmV0"))
+        assertEquals("intent://", UrlPolicy.debugLabel("intent://scan/#Intent;scheme=x;end"))
+    }
+
+    @Test
+    fun `debug label marks urls it cannot read`() {
+        assertEquals("(unparseable)", UrlPolicy.debugLabel("https://lms.ritsumei.ac.jp/a b?token=secret"))
+        assertEquals("(no-scheme)", UrlPolicy.debugLabel("/mod/assign/view.php?id=1"))
+    }
+
+    @Test
     fun `normalizes Moodle http URL to https`() {
         assertEquals(
             "https://lms.ritsumei.ac.jp/mod/assign/view.php?id=42",
